@@ -1,3 +1,2 @@
+// filepath: /Users/sudarssan_n/Downloads/project 2/.gitattributes
 Insights_360_Gemini_March.mp4 filter=lfs diff=lfs merge=lfs -text
-Insights_360_Gemini_March.mp4
- filter=lfs diff=lfs merge=lfs -text
