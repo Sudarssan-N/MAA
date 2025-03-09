@@ -241,7 +241,7 @@ app.post('/api/guided-appointment', optionalAuthenticate, async (req, res) => {
       suggestedLocation: null, 
       appointmentDetails: null,
       missingFields: [],
-      updatedGuidedData: null // New field to return updated data
+      updatedGuidedData: null
     };
 
     const isRegularCustomer = customerType === 'Regular';
@@ -266,10 +266,10 @@ app.post('/api/guided-appointment', optionalAuthenticate, async (req, res) => {
 
       Provide structured suggestions and a natural language prompt based on the step and query:
       - For 'reason': Return a prompt like "Please select a reason for your visit." and suggest reasons if no reason is set.
-      - For 'dateTime': Suggest 3 available date/time slots (YYYY-MM-DD HH:MM) based on reason, previous appointments, and business hours (9 AM - 5 PM), with a prompt like "Please select a date and time for your appointment." If query adjusts the time (e.g., "Change to 2pm"), update dateTime.
+      - For 'dateTime': Suggest 3 available date/time slots (YYYY-MM-DD HH:MM) based on reason, previous appointments, and business hours (9 AM - 5 PM), with a prompt like "Please select a date and time for your appointment." If query is "Suggest different time slots" or "I need a different time slot", generate 3 new unique slots (avoiding previously suggested times). If query adjusts the time (e.g., "Change to 2pm" or "I want 2pm"), update dateTime to the closest available time (e.g., "2025-03-09 14:00") and move to the next step.
       - For 'location': Suggest a location (Brooklyn, Manhattan, or New York) based on the most frequent previous location or default to 'Manhattan', with a prompt like "Your preferred location is [location]. Confirm or choose another?" If query adjusts the location (e.g., "Use Manhattan"), update location.
       - For 'confirmation': Validate required fields (Reason_for_Visit__c, Appointment_Time__c, Location__c), create the appointment if valid, and return a prompt like "Appointment confirmed!" or list missing fields. If query suggests changes (e.g., "Start over"), reset guided data.
-      - If query provides new information (e.g., "Change the time to 2pm" or "Use Manhattan"), update the relevant field in updatedGuidedData and suggest the next step.
+      - If query provides new information (e.g., "Change the time to 2pm" or "Use Manhattan"), update the relevant field in updatedGuidedData and suggest the next step. If query requests new time slots, return new suggestedDateTimes.
 
       Return JSON like: {
         "prompt": "Natural language prompt",
@@ -303,6 +303,12 @@ app.post('/api/guided-appointment', optionalAuthenticate, async (req, res) => {
           `${new Date().toISOString().split('T')[0]} 14:00`,
           `${new Date().toISOString().split('T')[0]} 16:00`,
         ];
+        if (query && (query.toLowerCase().includes('suggest different') || query.toLowerCase().includes('different time'))) {
+          // Generate new unique slots (example logic, enhance with actual availability check)
+          const newSlots = generateUniqueTimeSlots(responseData.suggestedDateTimes || []);
+          responseData.suggestedDateTimes = newSlots;
+          responseData.prompt = "Here are some different time slots. Please select one.";
+        }
         break;
       case 'location':
         responseData.prompt = parsedResponse.prompt || `Your preferred location is ${parsedResponse.suggestedLocation}. Confirm or choose another?`;
@@ -342,10 +348,12 @@ app.post('/api/guided-appointment', optionalAuthenticate, async (req, res) => {
     // Apply updates from query if provided
     if (parsedResponse.updatedGuidedData) {
       responseData.updatedGuidedData = parsedResponse.updatedGuidedData;
-      // Determine next step based on updated data
+      if (step === 'dateTime' && parsedResponse.suggestedDateTimes) {
+        responseData.suggestedDateTimes = parsedResponse.suggestedDateTimes;
+      }
       if (responseData.updatedGuidedData.reason && !responseData.updatedGuidedData.dateTime) {
         responseData.prompt = "Please select a date and time for your appointment.";
-        responseData.suggestedDateTimes = [
+        responseData.suggestedDateTimes = responseData.suggestedDateTimes || [
           `${new Date().toISOString().split('T')[0]} 10:00`,
           `${new Date().toISOString().split('T')[0]} 14:00`,
           `${new Date().toISOString().split('T')[0]} 16:00`,
@@ -364,6 +372,22 @@ app.post('/api/guided-appointment', optionalAuthenticate, async (req, res) => {
     res.status(500).json({ message: 'Error processing guided appointment', error: error.message });
   }
 });
+
+// Helper function to generate unique time slots (replace with actual availability logic)
+function generateUniqueTimeSlots(existingSlots) {
+  const baseDate = new Date().toISOString().split('T')[0];
+  const slots = [];
+  const usedTimes = new Set(existingSlots.map(slot => slot.split(' ')[1]));
+  const availableTimes = ['09:00', '11:00', '13:00', '15:00', '17:00'].filter(time => !usedTimes.has(time));
+  for (let i = 0; i < 3 && i < availableTimes.length; i++) {
+    slots.push(`${baseDate} ${availableTimes[i]}`);
+  }
+  return slots.length === 3 ? slots : [
+    `${baseDate} 09:00`,
+    `${baseDate} 11:00`,
+    `${baseDate} 13:00`,
+  ];
+}
 
 app.get('/api/auth/check-session', (req, res) => {
   console.log('Checking session status');

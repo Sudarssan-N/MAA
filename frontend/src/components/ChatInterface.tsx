@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MessageSquare, Calendar, AlertCircle, CheckCircle, Mic } from 'lucide-react';
+import { Send, MessageSquare, Calendar, AlertCircle, CheckCircle, Mic, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 
 declare global {
@@ -25,7 +25,7 @@ interface Message {
 
 interface AppointmentDetails {
   Reason_for_Visit__c: string | null;
-  Appointment_Time__c: string | null; // Single datetime field
+  Appointment_Time__c: string | null;
   Location__c: string | null;
   Customer_Type__c?: string | null;
   Id?: string;
@@ -199,6 +199,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
     }
   };
 
+  const handleSuggestDifferentSlots = async () => {
+    setIsProcessing(true);
+    try {
+      const result = await fetchGuidedSuggestions('dateTime', {
+        reason: guidedData.reason,
+        query: "Suggest different time slots",
+      });
+      setMessages(prev => [...prev, { type: 'assistant', text: result.prompt }]);
+      setGuidedData(prev => ({
+        ...prev,
+        suggestedDateTimes: result.suggestedDateTimes,
+        dateTime: undefined, // Clear selected dateTime to allow new selection
+      }));
+      setGuidedStep('dateTime'); // Stay on dateTime step with new slots
+    } catch (error) {
+      console.error('Error suggesting different slots:', error);
+      setMessages(prev => [...prev, { type: 'assistant', text: `Error: ${error.message}` }]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleSend = async (text: string = input) => {
     if (!text.trim() || isProcessing) return;
 
@@ -217,7 +239,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
 
       const result = await fetchGuidedSuggestions(guidedStep || 'reason', {
         ...guidedData,
-        query: text, // Pass chat input as query
+        query: text,
       });
 
       setMessages(prev => prev.filter(msg => !msg.isLoading));
@@ -227,13 +249,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
       // Update guided data and step based on response
       if (result.updatedGuidedData) {
         setGuidedData(prev => ({ ...prev, ...result.updatedGuidedData }));
-        if (result.updatedGuidedData.reason && !result.updatedGuidedData.dateTime) setGuidedStep('dateTime');
-        else if (result.updatedGuidedData.dateTime && !result.updatedGuidedData.location) setGuidedStep('location');
-        else if (result.updatedGuidedData.location) setGuidedStep('confirmation');
-        else if (!result.updatedGuidedData.reason && !result.updatedGuidedData.dateTime && !result.updatedGuidedData.location) {
+        if (result.updatedGuidedData.reason && !result.updatedGuidedData.dateTime) {
+          setGuidedStep('dateTime');
+          setGuidedData(prev => ({ ...prev, suggestedDateTimes: result.suggestedDateTimes }));
+        } else if (result.updatedGuidedData.dateTime && !result.updatedGuidedData.location) {
+          setGuidedStep('location');
+          setGuidedData(prev => ({ ...prev, suggestedLocation: result.suggestedLocation }));
+        } else if (result.updatedGuidedData.location) {
+          setGuidedStep('confirmation');
+        } else if (!result.updatedGuidedData.reason && !result.updatedGuidedData.dateTime && !result.updatedGuidedData.location) {
           setGuidedStep('reason');
           setGuidedData({});
         }
+      } else if (guidedStep === 'dateTime' && result.suggestedDateTimes) {
+        setGuidedData(prev => ({
+          ...prev,
+          suggestedDateTimes: result.suggestedDateTimes,
+          dateTime: undefined, // Clear selected dateTime to allow new selection
+        }));
+        setGuidedStep('dateTime'); // Stay on dateTime step with new slots
       }
     } catch (error) {
       console.error('Error in chat:', error);
@@ -365,16 +399,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
         return (
           <div className="mb-4 p-3 bg-gray-100 rounded-lg max-w-[85%] mr-auto">
             {guidedData.suggestedDateTimes?.length ? (
-              guidedData.suggestedDateTimes.map((dt) => (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {guidedData.suggestedDateTimes.map((dt) => (
+                    <button
+                      key={dt}
+                      onClick={() => handleGuidedStep(dt)}
+                      disabled={isProcessing}
+                      className="p-2 m-1 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {dt}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={dt}
-                  onClick={() => handleGuidedStep(dt)}
+                  onClick={handleSuggestDifferentSlots}
                   disabled={isProcessing}
-                  className="p-2 m-1 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  className="mt-2 p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1"
                 >
-                  {dt}
+                  <RefreshCw className="w-4 h-4" />
+                  Suggest Different Slots
                 </button>
-              ))
+              </>
             ) : (
               <p>No date/time options available. Please try again or use chat to specify.</p>
             )}
@@ -575,12 +621,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
             {message.text}
           </div>
         ))}
-        {renderGuidedStep()} {/* Render guided step UI */}
+        {renderGuidedStep()}
         {renderAppointmentStatus()}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Always show chat input */}
       <div className="p-4 border-t bg-gray-50">
         <p className="text-sm text-gray-600 mb-2">Need to adjust? Use chat to provide additional details or corrections.</p>
         <div className="flex space-x-2">
