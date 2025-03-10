@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'http://localhost:4173',
   credentials: true,
 }));
 
@@ -370,6 +370,7 @@ app.post('/api/guidedFlow', async (req, res) => {
 User selected a reason: ${flowData.reason}.
 Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-10T16:00:00.000Z").
 Return them under "timeSlots" array in JSON.
+Start the Dates from 10 march 2025 it is.
 Include a "response" that politely offers those slots, plus an "alternateDatesOption" if you wish.
         `;
         break;
