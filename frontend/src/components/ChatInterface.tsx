@@ -353,7 +353,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
   // Default messages
   const getDefaultMessages = (): Message[] => [
     { type: 'assistant', text: "We're here to make booking an appointment with your banker quick, and easy!" },
-    { type: 'assistant', text: "You can chat with us or use our guided flow to book your appointment step-by-step." },
+    { type: 'assistant', text: "Chat or speak with us to easily book your appointment—just share your preferred date, time, banker, branch, and reason, or use our simple step-by-step guided mode." },
   ];
 
   useEffect(() => {

@@ -620,6 +620,7 @@ Rules:
 
 Additional Slot Availability Check:
 - Before finalizing the appointment details, check if the suggested appointment slot (combination of Appointment_Date__c and Appointment_Time__c) is already booked in the previous appointments.
+- If there is no conflicts dont need to mention that there is no conflicts, only mention if its there. 
 - If the slot is not available, indicate that the slot is taken and suggest alternative times or ask the user for a different preferred time, rather than proceeding to create a duplicate appointment.
 `;
     console.log('Generated prompt for OpenAI:', prompt);
