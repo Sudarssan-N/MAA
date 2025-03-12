@@ -105,12 +105,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [sessionError, setSessionError] = useState<boolean>(false);
+  const [appointmentStatusComponent, setAppointmentStatusComponent] = useState<JSX.Element | null>(null);
 
   // Appointment status for final display
   const [appointmentStatus, setAppointmentStatus] = useState<{
     details: AppointmentDetails | null;
     missingFields: string[];
   }>({ details: null, missingFields: [] });
+
+  // Function to fetch and set the appointment status component
+  const fetchAppointmentStatus = async () => {
+    const component = await renderAppointmentStatus();
+    setAppointmentStatusComponent(component);
+  };  
 
   // Toggle between guided and unguided flow
   const [isGuidedFlow, setIsGuidedFlow] = useState(false);
@@ -182,6 +189,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
       missingFields: data.missingFields || [],
     };
   };
+  // Call fetchAppointmentStatus when needed, e.g., after confirming an appointment
+  useEffect(() => {
+    if (guidedStep === 'completed') {
+      fetchAppointmentStatus();
+    }
+  }, [guidedStep]);
 
   // ---- On initial mount, set default messages
   useEffect(() => {
@@ -378,6 +391,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
       setMessages(prev => prev.filter(msg => !msg.isLoading));
       setMessages(prev => [...prev, { type: 'assistant', text: response }]);
       setAppointmentStatus({ details: appointmentDetails, missingFields });
+      await fetchAppointmentStatus(); // Add this line
     } catch (error) {
       console.error('Error in chat:', error);
       setMessages(prev => prev.filter(msg => !msg.isLoading));
@@ -555,12 +569,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
   };
 
   // ---- Render final confirmation if we have an appointment ID
-  const renderAppointmentStatus = () => {
+  const renderAppointmentStatus = async () => {
     const { details } = appointmentStatus;
+    const chatHistory = messages.map(msg => ({ type: msg.type, text: msg.text }));
     if (!details || !details.Id ) return null;
+    console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
+
+    // Verify if the user has confirmed booking the appointment
+    const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+      body:JSON.stringify({ text: input, chatHistory }), // Send the whole text input
+    });
+
+    const { isConfirmed } = await response.json();
+
+    if (!isConfirmed) return null;
 
     // Log the details for debugging
-    console.log('Appointment Details:', details);
+    console.log('Is confirmed', isConfirmed);
 
     return (
       <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
@@ -571,13 +602,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
         <div className="space-y-1 text-sm">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             <div className="text-gray-500">Purpose:</div>
-            <div>{details.Reason_for_Visit__c || '(Not specified)'}</div>
+            <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
             <div className="text-gray-500">Date & Time:</div>
-            <div>{formatAppointmentTime(details.Appointment_Time__c) || '(Not specified)'}</div>
+            <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
             <div className="text-gray-500">Location:</div>
-            <div>{details.Location__c || '(Not specified)'}</div>
+            <div>{details?.Location__c || '(Not specified)'}</div>
           </div>
-          {details.Id && (
+          {details?.Id && (
             <p className="mt-2 text-gray-600 text-xs">
               Appointment ID: {details.Id}
             </p>
@@ -633,7 +664,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
             {message.text}
           </div>
         ))}
-        {guidedStep !== 'completed' && renderAppointmentStatus()}
+        {/* {guidedStep !== 'completed' && renderAppointmentStatus()} */}
+        {appointmentStatusComponent}
         <div ref={messagesEndRef} />
       </div>
 
@@ -745,7 +777,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
             {guidedStep === 'completed' && (
               <div className="mb-4">
                 {/* Show the detailed confirmation window */}
-                {renderAppointmentStatus()}
+                {/* {renderAppointmentStatus()} */}
+                {appointmentStatusComponent}
                 <button
                   onClick={() => {
                     setGuidedStep('reason');

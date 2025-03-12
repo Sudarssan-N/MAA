@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use(cors({
-  origin: 'http://localhost:4173',
+  origin: 'http://localhost:5173',
   credentials: true,
 }));
 
@@ -618,16 +618,12 @@ Rules:
 - Respond in natural language under "response" and provide structured data under "appointmentDetails".
 - Return JSON like: {"response": "Here's a suggestion...", "appointmentDetails": {...}}
 
-Additional Slot Availability Check:
-- Before finalizing the appointment details, check if the suggested appointment slot (combination of Appointment_Date__c and Appointment_Time__c) is already booked in the previous appointments.
-- If there is no conflicts dont need to mention that there is no conflicts, only mention if its there. 
-- If the slot is not available, indicate that the slot is taken and suggest alternative times or ask the user for a different preferred time, rather than proceeding to create a duplicate appointment.
 `;
-    console.log('Generated prompt for OpenAI:', prompt);
+    // console.log('Generated prompt for OpenAI:', prompt);
 
     const systemPrompt = { role: 'system', content: prompt };
     const tempMessages = [...req.session.chatHistory, systemPrompt];
-    console.log('Messages sent to OpenAI:', JSON.stringify(tempMessages, null, 2));
+    // console.log('Messages sent to OpenAI:', JSON.stringify(tempMessages, null, 2));
 
     const openaiResponse = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -664,7 +660,7 @@ Additional Slot Availability Check:
 
     const requiredFields = ['Reason_for_Visit__c', 'Appointment_Date__c', 'Appointment_Time__c', 'Location__c'];
     const missingFields = requiredFields.filter(field => !appointmentDetails[field]);
-    console.log('Missing fields in appointment details:', missingFields);
+    // console.log('Missing fields in appointment details:', missingFields);
 
     if (missingFields.length === 0) {
       const dateTime = combineDateTime(appointmentDetails.Appointment_Date__c, appointmentDetails.Appointment_Time__c);
@@ -684,13 +680,13 @@ Additional Slot Availability Check:
         ...(appointmentDetails.Banker__c && appointmentDetails.Banker__c.match(/^005/) && { Banker__c: appointmentDetails.Banker__c }),
       };
     
-      console.log('Creating appointment in Salesforce with data:', JSON.stringify(fullAppointmentData, null, 2));
+      // console.log('Creating appointment in Salesforce with data:', JSON.stringify(fullAppointmentData, null, 2));
       const createResult = await conn.sobject('Appointment__c').create(fullAppointmentData);
       if (createResult.success) {
         appointmentId = createResult.id;
         appointmentDetails.Id = appointmentId;
         appointmentDetails.Appointment_Time__c = dateTime;
-        console.log('Appointment created in Salesforce with ID:', appointmentId);
+        // console.log('Appointment created in Salesforce with ID:', appointmentId);
       } else {
         console.error('Failed to create appointment in Salesforce:', createResult);
         throw new Error('Failed to create appointment in Salesforce: ' + JSON.stringify(createResult.errors));
@@ -703,7 +699,7 @@ Additional Slot Availability Check:
       missingFields,
       previousAppointments: previousAppointments.length > 0 ? previousAppointments : undefined
     };
-    console.log('Sending response to client:', JSON.stringify(responseData, null, 2));
+    // console.log('Sending response to client:', JSON.stringify(responseData, null, 2));
     res.json(responseData);
   } catch (error) {
     console.error('Error processing chat request:', error.message);
@@ -738,8 +734,51 @@ app.get('/api/chat/state', optionalAuthenticate, (req, res) => {
     messages: req.session.chatHistory.filter(msg => msg.role !== 'system'),
     appointmentDetails: parsed.appointmentDetails || null
   };
-  console.log('Sending chat state to client:', JSON.stringify(responseData, null, 2));
+  // console.log('Sending chat state to client:', JSON.stringify(responseData, null, 2));
   res.json(responseData);
+});
+
+app.post('/api/verify-confirmation', async (req, res) => {
+  const { text, chatHistory } = req.body;
+
+  console.log('Verifying confirmation:', { text, chatHistory });
+  if (!chatHistory || !Array.isArray(chatHistory)) {
+    return res.status(400).json({ message: 'Invalid request: chatHistory field is required and must be an array' });
+  }
+
+  const userText = text || 'No specific input provided by the user';
+
+  // Get the last 2 or 3 messages from the chatHistory
+  const recentChatHistory = chatHistory.slice(-3);
+
+  try {
+    const messages = [
+      { role: 'system', content: 'Return me true or false if the user has confirmed booking the appointment.' },
+      ...recentChatHistory.map(msg => ({ role: msg.type === 'user' ? 'user' : 'assistant', content: msg.text })),
+    ];
+
+    // If userText is provided, add it to the messages
+    if (text) {
+      messages.splice(1, 0, { role: 'user', content: userText });
+    }
+    console.log('OpenAI request message:', messages);
+
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: messages,
+      max_tokens: 50,
+      temperature: 0.5,
+    });
+    console.log('OpenAI response:', openaiResponse.choices[0].message.content.trim());
+
+    const llmOutput = openaiResponse.choices[0].message.content.trim();
+    const isConfirmed = llmOutput.toLowerCase().includes('confirmed') || llmOutput.toLowerCase().includes('true') || llmOutput.toLowerCase().includes('yes') || llmOutput.toLowerCase().includes('successfully scheduled');
+
+    res.json({ isConfirmed });
+  } catch (error) {
+    console.error('Error verifying confirmation:', error);
+    res.status(500).json({ message: 'Error verifying confirmation', error: error.message });
+  }
 });
 
 app.listen(PORT, () => {
