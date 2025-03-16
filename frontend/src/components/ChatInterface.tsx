@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Send, MessageSquare, AlertCircle, CheckCircle, Mic } from 'lucide-react';
+import { Send, AlertCircle, CheckCircle, Mic } from 'lucide-react';
 import clsx from 'clsx';
 
 // SpeechRecognition support
@@ -113,7 +113,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const [llmLocationOptions, setLLMLocationOptions] = useState<string[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('');
 
-  // New state for tracking if the user typed an override input.
+  // New state for tracking override input in guided mode.
   const [overrideUsed, setOverrideUsed] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -125,6 +125,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const [currentPlaceholder, setCurrentPlaceholder] = useState('');
   const [charIndex, setCharIndex] = useState(0);
 
+  // Default prompt buttons (depends on user type)
   const prompts = userType === 'customer' ? CUSTOMER_PROMPTS : GUEST_PROMPTS;
 
   const fetchAppointmentStatus = async () => {
@@ -366,7 +367,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         setInput('');
         return;
       } else if (guidedStep === 'date') {
-        // Here you might validate or format the text as needed.
         handleTimeSelection({ display: text, raw: text });
         setOverrideUsed(true);
         setInput('');
@@ -713,11 +713,11 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
             )}
 
             {guidedStep === 'date' && (
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <p className="mb-2 font-medium">Here are some suggested appointment slots:</p>
+              <div className="mb-4">
+                <p className="mb-2 font-medium">Here are some suggested appointment slots:</p>
+                <div className="flex flex-wrap gap-2 items-center">
                   {llmDateSuggestions.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
+                    <>
                       {llmDateSuggestions.map(slot => (
                         <button
                           key={slot.raw}
@@ -728,14 +728,18 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
                           {slot.display}
                         </button>
                       ))}
-                    </div>
+                      <button
+                        onClick={reloadDateSuggestions}
+                        disabled={isProcessing}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg"
+                      >
+                        Refresh Slots
+                      </button>
+                    </>
                   ) : (
                     <p className="text-gray-500">Loading suggestions...</p>
                   )}
                 </div>
-                <button onClick={reloadDateSuggestions} className="ml-4" title="Reload Dates">
-                  <span className="material-icons">refresh</span>
-                </button>
               </div>
             )}
 
@@ -774,10 +778,26 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
               </div>
             )}
           </>
-        ) : null}
+        ) : (
+          // Default prompts when not in guided mode.
+          <div className="mb-4">
+            <p className="mb-2 font-medium">Suggested Prompts:</p>
+            <div className="flex flex-wrap gap-2">
+              {prompts.map(prompt => (
+                <button
+                  key={prompt}
+                  onClick={() => handleSend(prompt)}
+                  className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
-        {/* Constant Start Over button */}
-        <div className="mt-4">
+        {/* Start Over button placed at the bottom and aligned to the right */}
+        <div className="flex justify-end mt-4">
           <button 
             onClick={resetGuidedFlow}
             className="px-4 py-2 bg-gray-500 text-white rounded-lg"
