@@ -16,6 +16,7 @@ interface ChatInterfaceProps {
   userType: 'guest' | 'customer' | null;
   token?: string | null;
   isGuidedMode: boolean; // Add isGuidedMode prop  
+  onReasonChange: (reason: string | undefined) => void;
 }
 
 interface Message {

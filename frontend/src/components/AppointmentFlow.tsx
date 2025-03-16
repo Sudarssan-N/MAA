@@ -1,110 +1,48 @@
-import React, { useState, useEffect } from 'react';
-import { Lock, UserCheck, Calendar } from 'lucide-react';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Calendar, Lock, UserCheck } from 'lucide-react';
 import ChatInterface from './ChatInterface';
 import LoginModal from './LoginModal';
-import { motion, AnimatePresence } from 'framer-motion';
 
-const AppointmentFlow = () => {
-  const [showChat, setShowChat] = useState(false);
+interface AppointmentFlowProps {
+  isLoggedIn: boolean;
+  userName: string | null;
+  userType: 'guest' | 'customer' | null;
+  onLogin: (username: string, password: string) => Promise<void>;
+  onLogout: () => Promise<void>;
+  onGuest: () => void;
+  onReasonChange: (reason: string | undefined) => void;
+  showChat: boolean;
+}
+
+const AppointmentFlow: React.FC<AppointmentFlowProps> = ({
+  isLoggedIn,
+  userName,
+  userType,
+  onLogin,
+  onLogout,
+  onGuest,
+  onReasonChange,
+  showChat,
+}) => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userName, setUserName] = useState('');
-  const [userType, setUserType] = useState<'guest' | 'customer' | null>(null);
-  const [isGuidedMode, setIsGuidedMode] = useState(false);
-
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const response = await fetch('http://localhost:3000/api/auth/check-session', {
-          method: 'GET',
-          credentials: 'include',
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log('Session check response:', data); // Debug log
-          setIsLoggedIn(true);
-          setUserName(data.username);
-          setUserType('customer'); // Any logged-in user is a customer
-          setShowChat(true);
-        } else {
-          console.log('No active session found');
-          setIsLoggedIn(false);
-          setUserName('');
-          setUserType(null);
-        }
-      } catch (error) {
-        console.error('Session check failed:', error);
-        setIsLoggedIn(false);
-        setUserName('');
-        setUserType(null);
-      }
-    };
-
-    checkSession();
-  }, []);
+  const [isGuidedMode, setIsGuidedMode] = useState(true);
 
   const handleLogin = async (username: string, password: string) => {
-    try {
-      const response = await fetch('http://localhost:3000/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        console.log('Login successful:', data); // Debug log
-        setIsLoginModalOpen(false);
-        setIsLoggedIn(true);
-        setUserName(data.username);
-        setUserType('customer');
-        setShowChat(true);
-      } else {
-        alert(data.message || 'Login failed. Please try again.');
-      }
-    } catch (error) {
-      console.error('Login failed:', error);
-      alert('Something went wrong. Please try again.');
-    }
+    await onLogin(username, password);
+    setIsLoginModalOpen(false);
   };
 
   const handleGuest = () => {
-    console.log('Continuing as guest'); // Debug log
-    setUserType('guest');
-    setUserName('Guest');
-    setIsLoggedIn(false);
-    setShowChat(true);
+    onGuest();
   };
 
   const handleLogout = async () => {
-    try {
-      const response = await fetch('http://localhost:3000/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (response.ok) {
-        console.log('Logout successful'); // Debug log
-        setIsLoggedIn(false);
-        setUserName('');
-        setUserType(null);
-        setShowChat(false);
-        alert('Logged out successfully');
-      } else {
-        const data = await response.json();
-        alert(data.message || 'Logout failed. Please try again.');
-      }
-    } catch (error) {
-      console.error('Logout failed:', error);
-      alert('Something went wrong during logout. Please try again.');
-    }
+    await onLogout();
   };
 
   return (
-    <div className="max-w-5xl mx-auto mt-8 bg-white rounded-lg shadow-lg overflow-hidden">
+    <div className="bg-white rounded-lg shadow-lg overflow-hidden">
       <div className="p-4 bg-gray-50 border-b flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <Calendar className="w-5 h-5 text-[#CD1309]" />
@@ -196,8 +134,9 @@ const AppointmentFlow = () => {
                 isLoggedIn={isLoggedIn}
                 userName={userName}
                 userType={userType}
-                token={null} // Add token if needed from login response                
-                isGuidedMode={isGuidedMode} // Pass isGuidedMode to ChatInterface
+                token={null}
+                isGuidedMode={isGuidedMode}
+                onReasonChange={onReasonChange}
               />
             </motion.div>
           )}

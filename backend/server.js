@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'http://localhost:4173',
   credentials: true,
 }));
 
@@ -32,6 +32,39 @@ const PORT = process.env.PORT || 3000;
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// In the backend (index.js)
+const productMapping = {
+  "checking_account": [
+    { name: "Everyday Checking", description: "A versatile checking account for daily transactions.", key: "checking_account" },
+    { name: "Clear Access Banking", description: "Prevent overspending with balance-based limits.", key: "checking_account" },
+    { name: "Student/Teen Banking", description: "A checking account designed for younger customers.", key: "checking_account" },
+  ],
+  "savings_account": [
+    { name: "Way2Save® Savings", description: "Build your savings with automatic transfers.", key: "savings_account" },
+    { name: "Platinum Savings", description: "Earn higher interest on your savings.", key: "savings_account" },
+    { name: "Certificates of Deposit", description: "Secure a guaranteed return over a fixed term.", key: "savings_account" },
+  ],
+  "credit_card": [
+    { name: "Cash Back Credit Card", description: "Earn cash back on everyday purchases.", key: "credit_card" },
+    { name: "0% Intro APR Credit Card", description: "Manage spending with no interest for an introductory period.", key: "credit_card" },
+    { name: "Rewards Credit Card", description: "Earn points or miles for travel and perks.", key: "credit_card" },
+    { name: "Balance Transfer Credit Card", description: "Consolidate debt with a low introductory APR.", key: "credit_card" },
+  ],
+  "personal_loan": [
+    { name: "Personal Loan", description: "Finance your needs with a fixed-rate loan.", key: "personal_loan" },
+  ],
+  "digital_banking": [
+    { name: "Digital Banking Tools", description: "Manage your finances with our online and mobile app.", key: "digital_banking" },
+  ],
+};
+
+// Default recommendations if no match is found
+const defaultRecommendations = [
+  { name: "Everyday Checking", description: "A versatile checking account for daily transactions.", key: "checking_account" },
+  { name: "Way2Save® Savings", description: "Build your savings with automatic transfers.", key: "savings_account" },
+  { name: "Digital Banking Tools", description: "Manage your finances with our online and mobile app.", key: "digital_banking" },
+];
 
 const getSalesforceConnection = () => {
   console.log('Attempting to establish Salesforce connection');
@@ -778,6 +811,124 @@ app.post('/api/verify-confirmation', async (req, res) => {
   } catch (error) {
     console.error('Error verifying confirmation:', error);
     res.status(500).json({ message: 'Error verifying confirmation', error: error.message });
+  }
+});
+
+app.get('/api/salesforce/banker-notes', authenticate, async (req, res) => {
+  console.log('Fetching Salesforce banker notes for Contact__c: 003dM000005H5A7QAK');
+  try {
+    const conn = getSalesforceConnection();
+    const query = "SELECT Visit_Reason__c FROM Branch_Visit__c WHERE Contact__c = '003dM000005H5A7QAK' ORDER BY CreatedDate DESC ";
+    console.log('Executing Salesforce query:', query);
+    const result = await conn.query(query);
+    const bankerNotes = result.records.map(record => record.Banker_Notes__c).filter(Boolean);
+    console.log('Salesforce banker notes retrieved:', bankerNotes);
+    res.json({ bankerNotes });
+  } catch (error) {
+    console.error('Error fetching banker notes:', error.message);
+    res.status(500).json({ message: 'Failed to fetch banker notes', error: error.message });
+  }
+});
+
+app.post('/api/salesforce/visit-history', authenticate, async (req, res) => {
+  console.log('Fetching Salesforce visit history for Contact__c: 003dM000005H5A7QAK');
+  try {
+    const conn = getSalesforceConnection();
+    const { query } = req.body;
+    if (!query) {
+      console.log('Missing query in request body');
+      return res.status(400).json({ message: 'Missing query in request body' });
+    }
+    console.log('Executing Salesforce query:', query);
+    const result = await conn.query(query);
+    console.log('Salesforce visit history retrieved:', JSON.stringify(result.records, null, 2));
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching visit history:', error.message);
+    res.status(500).json({ message: 'Failed to fetch visit history', error: error.message });
+  }
+});
+
+app.post('/api/chat/recommendations', authenticate, async (req, res) => {
+  console.log('Received request for product recommendations:', JSON.stringify(req.body, null, 2));
+  try {
+    const { visitReasons, customerType, bankerNotes, currentReason } = req.body;
+    if (!visitReasons || !Array.isArray(visitReasons)) {
+      console.log('Missing or invalid visitReasons in request body');
+      return res.status(400).json({ message: 'Missing or invalid visitReasons' });
+    }
+
+    // Fetch banker notes if not provided
+    let notes = bankerNotes || [];
+    if (!notes.length) {
+      const conn = getSalesforceConnection();
+      const query = "SELECT Banker_Notes__c FROM Appointment__c WHERE Contact__c = '003dM000005H5A7QAK' AND Banker_Notes__c != null ORDER BY CreatedDate DESC LIMIT 5";
+      const result = await conn.query(query);
+      notes = result.records.map(record => record.Banker_Notes__c).filter(Boolean);
+    }
+
+    // Prepare context for LLM
+    const contextData = `
+Visit Reasons: ${visitReasons.join(', ')}
+Banker Notes: ${notes.join('; ') || 'No banker notes available.'}
+${currentReason ? `Current Appointment Reason: ${currentReason}` : 'No current appointment reason provided.'}
+Available Product Categories: ${Object.keys(productMapping).join(', ')}
+`;
+
+    // LLM Prompt
+    const prompt = `
+You are a banking assistant tasked with recommending products based on a customer's visit history, banker notes, and current appointment reason. Use the following context to suggest up to 3 products from the available categories.
+
+${contextData}
+
+Rules:
+- Analyze the visit reasons, banker notes, and current appointment reason (if provided) to determine the customer's needs.
+- Recommend up to 3 products by selecting the most relevant product categories from: ${Object.keys(productMapping).join(', ')}.
+- Return the recommendations in JSON format with a "recommendations" array containing the category keys (e.g., "checking_account", "savings_account") and a "reason" explaining why these products were recommended.
+- Example response: {"recommendations": ["checking_account", "savings_account"], "reason": "Customer frequently visits to open accounts and manage savings."}
+`;
+
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: 'Please recommend products based on the provided context.' },
+      ],
+      max_tokens: 300,
+      temperature: 0.7,
+    });
+
+    const llmOutput = openaiResponse.choices[0].message.content.trim();
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(llmOutput);
+    } catch (error) {
+      console.error('Failed to parse LLM response:', error.message);
+      parsedResponse = { recommendations: [], reason: 'Error parsing LLM response.' };
+    }
+
+    // Map LLM-recommended categories to actual products
+    const recommendedCategories = parsedResponse.recommendations || [];
+    const recommendations = [];
+    for (const category of recommendedCategories) {
+      if (productMapping[category]) {
+        recommendations.push(productMapping[category][0]); // Pick the first product from the category
+      }
+    }
+
+    // Fallback to defaults if no recommendations
+    if (!recommendations.length) {
+      recommendations.push(...defaultRecommendations.slice(0, 3));
+      parsedResponse.reason = 'No specific recommendations matched; providing default products.';
+    }
+
+    res.json({
+      recommendations: recommendations.slice(0, 3),
+      reason: parsedResponse.reason || 'Recommendations based on visit history and banker notes.',
+    });
+  } catch (error) {
+    console.error('Error generating product recommendations:', error.message);
+    res.status(500).json({ message: 'Failed to generate product recommendations', error: error.message });
   }
 });
 
