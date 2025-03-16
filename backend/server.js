@@ -564,7 +564,7 @@ app.post('/api/chat', optionalAuthenticate, async (req, res) => {
     if (query.toLowerCase().includes(branchQuery.toLowerCase())) {
       console.log('Detected predefined branch query');
       const predefinedResponse = {
-        response: "I found a branch that meets your criteria. It's located at 123 Main St, Brooklyn, NY 11201. If you would like to Naviage there here is the link: https://goo.gl/maps/12345",
+        response: "I found a branch that meets your criteria. It's located at 123 Main St, Brooklyn, NY 11201. If you would like to Navigate there here is the link: https://goo.gl/maps/12345",
         appointmentDetails: null,
         missingFields: []
       };

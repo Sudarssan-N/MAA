@@ -27,8 +27,8 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
   onReasonChange,
   showChat,
 }, ref) => {
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isGuidedMode, setIsGuidedMode] = useState(true);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(true);
+  const [isGuidedMode, setIsGuidedMode] = useState(false);
 
   const handleLogin = async (username: string, password: string) => {
     await onLogin(username, password);

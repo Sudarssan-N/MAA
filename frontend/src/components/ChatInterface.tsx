@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Send, AlertCircle, CheckCircle, Mic } from 'lucide-react';
+import { Send, MessageSquare, AlertCircle, CheckCircle, Mic } from 'lucide-react';
 import clsx from 'clsx';
 
 // SpeechRecognition support
@@ -106,14 +106,13 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     missingFields: string[];
   }>({ details: null, missingFields: [] });
 
+  // Guided flow states
   const [guidedStep, setGuidedStep] = useState<GuidedStep>('reason');
   const [selectedReason, setSelectedReason] = useState('');
   const [llmDateSuggestions, setLLMDateSuggestions] = useState<{ display: string; raw: string }[]>([]);
   const [selectedDateTime, setSelectedDateTime] = useState<{ display: string; raw: string }>({ display: '', raw: '' });
   const [llmLocationOptions, setLLMLocationOptions] = useState<string[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('');
-
-  // New state for tracking override input in guided mode.
   const [overrideUsed, setOverrideUsed] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -125,7 +124,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const [currentPlaceholder, setCurrentPlaceholder] = useState('');
   const [charIndex, setCharIndex] = useState(0);
 
-  // Default prompt buttons (depends on user type)
+  // Default prompts for unguided flow
   const prompts = userType === 'customer' ? CUSTOMER_PROMPTS : GUEST_PROMPTS;
 
   const fetchAppointmentStatus = async () => {
@@ -356,10 +355,11 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Unguided free-form send
   const handleSend = async (text: string = input) => {
     if (!text.trim() || isProcessing) return;
 
-    // If in guided mode and the flow is not completed, treat the text as an override input.
+    // In guided mode, if not completed, we use the text to override the button selections
     if (isGuidedMode && guidedStep !== 'completed') {
       if (guidedStep === 'reason') {
         handleReasonSelection(text);
@@ -633,21 +633,25 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-  // Function to reset the guided flow
-  const resetGuidedFlow = () => {
-    setGuidedStep('reason');
+  // Enhanced reset function to handle both guided and unguided flows
+  const resetSession = () => {
+    setGuidedStep('reason'); // Reset guided step
     setSelectedReason('');
     setSelectedDateTime({ display: '', raw: '' });
     setSelectedLocation('');
     setLLMDateSuggestions([]);
     setLLMLocationOptions([]);
     setOverrideUsed(false);
-    setMessages(getDefaultMessages());
-    onReasonChange(undefined);
+    setMessages(getDefaultMessages()); // Reset messages to default
+    setInput(''); // Clear input field
+    setAppointmentStatus({ details: null, missingFields: [] }); // Clear appointment status
+    setAppointmentStatusComponent(null); // Clear appointment status component
+    onReasonChange(undefined); // Notify parent of reason change
   };
 
   return (
     <div className="h-full flex flex-col">
+      {/* Session Error Banner */}
       {sessionError && (
         <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-2">
           <div className="flex">
@@ -692,6 +696,17 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       </div>
 
       <div className="p-4 border-t bg-gray-50">
+        {/* Add Start Over Button at the top of the input area */}
+        <div className="flex justify-end mb-2">
+          <button
+            onClick={resetSession}
+            disabled={isProcessing || sessionError}
+            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
+          >
+            Start Over
+          </button>
+        </div>
+
         {isGuidedMode ? (
           <>
             {guidedStep === 'reason' && (
@@ -715,47 +730,45 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
             {guidedStep === 'date' && (
               <div className="mb-4">
                 <p className="mb-2 font-medium">Here are some suggested appointment slots:</p>
-                <div className="flex flex-wrap gap-2 items-center">
-                  {llmDateSuggestions.length > 0 ? (
-                    <>
-                      {llmDateSuggestions.map(slot => (
-                        <button
-                          key={slot.raw}
-                          onClick={() => handleTimeSelection(slot)}
-                          disabled={isProcessing}
-                          className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
-                        >
-                          {slot.display}
-                        </button>
-                      ))}
+                {llmDateSuggestions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {llmDateSuggestions.map(slot => (
                       <button
-                        onClick={reloadDateSuggestions}
+                        key={slot.raw}
+                        onClick={() => handleTimeSelection(slot)}
                         disabled={isProcessing}
-                        className="px-4 py-2 bg-blue-500 text-white rounded-lg"
+                        className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
                       >
-                        Refresh Slots
+                        {slot.display}
                       </button>
-                    </>
-                  ) : (
-                    <p className="text-gray-500">Loading suggestions...</p>
-                  )}
-                </div>
+                    ))}
+                    <button
+                      onClick={reloadDateSuggestions}
+                      disabled={isProcessing}
+                      className="px-4 py-2 bg-blue-500 text-white rounded-lg"
+                    >
+                      Refresh Slots
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-gray-500">Loading suggestions...</p>
+                )}
               </div>
             )}
 
             {guidedStep === 'location' && (
               <div className="mb-4">
-                <p className="mb-2 font-medium">Please select a location:</p>
+                <p className="mb-2 font-medium">Please select a location for your appointment:</p>
                 {llmLocationOptions.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {llmLocationOptions.map(option => (
+                    {llmLocationOptions.map(loc => (
                       <button
-                        key={option}
-                        onClick={() => handleLocationSelection(option)}
+                        key={loc}
+                        onClick={() => handleLocationSelection(loc)}
                         disabled={isProcessing}
                         className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
                       >
-                        {option}
+                        {loc}
                       </button>
                     ))}
                   </div>
@@ -767,60 +780,129 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
             {guidedStep === 'confirmation' && (
               <div className="mb-4">
-                <p className="mb-2 font-medium">Confirm your appointment details:</p>
+                <p className="mb-2 font-medium">Review your details before confirming:</p>
+                <div className="p-4 border rounded-lg bg-gray-100 text-sm space-y-1">
+                  <p><strong>Reason:</strong> {selectedReason}</p>
+                  <p><strong>Date/Time:</strong> {selectedDateTime.display}</p>
+                  <p><strong>Location:</strong> {selectedLocation}</p>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={handleConfirmAppointment}
+                    disabled={isProcessing}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg"
+                  >
+                    Confirm Appointment
+                  </button>
+                  <button
+                    onClick={() => {
+                      setGuidedStep('reason');
+                      setSelectedReason('');
+                      setSelectedDateTime({ display: '', raw: '' });
+                      setSelectedLocation('');
+                      setLLMDateSuggestions([]);
+                      setLLMLocationOptions([]);
+                    }}
+                    disabled={isProcessing}
+                    className="px-4 py-2 bg-red-500 text-white rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {guidedStep === 'completed' && (
+              <div className="mb-4">
+                {appointmentStatusComponent}
                 <button
-                  onClick={handleConfirmAppointment}
-                  disabled={isProcessing}
-                  className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
+                  onClick={() => {
+                    setGuidedStep('reason');
+                    setAppointmentStatus({ details: null, missingFields: [] });
+                  }}
+                  className="mt-4 px-4 py-2 bg-[#CD1309] text-white rounded-lg"
                 >
-                  Confirm Appointment
+                  Book Another Appointment
                 </button>
               </div>
             )}
+
+            <div className="flex space-x-2 mt-4">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                placeholder="Or type a message..."
+                disabled={isProcessing || sessionError || isRecording}
+                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#CD1309] disabled:opacity-50"
+              />
+              <button
+                onClick={handleMicClick}
+                disabled={isProcessing || sessionError}
+                className={clsx(
+                  'px-4 py-2 rounded-lg transition-colors flex items-center justify-center',
+                  isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-800 hover:bg-gray-300',
+                  'disabled:opacity-50'
+                )}
+              >
+                <Mic className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => handleSend()}
+                disabled={isProcessing || sessionError || !input.trim() || isRecording}
+                className="px-4 py-2 bg-[#CD1309] text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:bg-gray-400"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
           </>
         ) : (
-          // Default prompts when not in guided mode.
-          <div className="mb-4">
-            <p className="mb-2 font-medium">Suggested Prompts:</p>
-            <div className="flex flex-wrap gap-2">
-              {prompts.map(prompt => (
+          <>
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-2">
+              {prompts.map((prompt, index) => (
                 <button
-                  key={prompt}
+                  key={index}
                   onClick={() => handleSend(prompt)}
-                  className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
+                  disabled={isProcessing || sessionError}
+                  className="text-left p-2 text-sm bg-white border rounded-lg hover:bg-gray-50 transition-colors flex items-start space-x-2 disabled:opacity-50"
                 >
-                  {prompt}
+                  <MessageSquare className="w-4 h-4 text-[#CD1309] mt-0.5 flex-shrink-0" />
+                  <span>{prompt}</span>
                 </button>
               ))}
             </div>
-          </div>
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                placeholder={currentPlaceholder || "Type your message..."}
+                disabled={isProcessing || sessionError || isRecording}
+                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#CD1309] disabled:opacity-50"
+              />
+              <button
+                onClick={handleMicClick}
+                disabled={isProcessing || sessionError}
+                className={clsx(
+                  'px-4 py-2 rounded-lg transition-colors flex items-center justify-center',
+                  isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-800 hover:bg-gray-300',
+                  'disabled:opacity-50'
+                )}
+              >
+                <Mic className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => handleSend()}
+                disabled={isProcessing || sessionError || !input.trim() || isRecording}
+                className="px-4 py-2 bg-[#CD1309] text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:bg-gray-400"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
+          </>
         )}
-
-        {/* Start Over button placed at the bottom and aligned to the right */}
-        <div className="flex justify-end mt-4">
-          <button 
-            onClick={resetGuidedFlow}
-            className="px-4 py-2 bg-gray-500 text-white rounded-lg"
-          >
-            Start Over
-          </button>
-        </div>
-
-        <div className="flex items-center mt-4">
-          <input
-            type="text"
-            value={input}
-            placeholder={currentPlaceholder || "Type your message..."}
-            onChange={(e) => setInput(e.target.value)}
-            className="flex-1 border rounded-lg px-4 py-2"
-          />
-          <button onClick={() => handleSend()} disabled={isProcessing} className="ml-2">
-            <Send className="w-6 h-6" />
-          </button>
-          <button onClick={handleMicClick} className="ml-2">
-            <Mic className="w-6 h-6" />
-          </button>
-        </div>
       </div>
     </div>
   );
