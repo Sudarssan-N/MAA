@@ -341,8 +341,7 @@ app.get('/api/salesforce/appointments', authenticate, async (req, res) => {
   console.log('Fetching Salesforce appointments for Contact__c: 003dM000005H5A7QAK');
   try {
     const conn = getSalesforceConnection();
-    const query = 'SELECT Id, Reason_for_Visit__c, Appointment_Date__c, Appointment_Time__c, Location__c ' +
-                  'FROM Appointment__c WHERE Contact__c = \'003dM000005H5A7QAK\'';
+    const query = 'SELECT Id, Reason_for_Visit__c, Appointment_Date__c, Appointment_Time__c, Location__c FROM Appointment__c WHERE Contact__c = \'003dM000005H5A7QAK\'';
     console.log('Executing Salesforce query:', query);
     const result = await conn.query(query);
     console.log('Salesforce data retrieved:', JSON.stringify(result.records, null, 2));
@@ -403,7 +402,7 @@ app.post('/api/guidedFlow', async (req, res) => {
 User selected a reason: ${flowData.reason}.
 Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-10T16:00:00.000Z").
 Return them under "timeSlots" array in JSON.
-Start the Dates from 10 march 2025 it is.
+Start the Dates from 16 march 2025 it is.
 Include a "response" that politely offers those slots, plus an "alternateDatesOption" if you wish.
         `;
         break;
@@ -862,20 +861,26 @@ app.post('/api/chat/recommendations', authenticate, async (req, res) => {
     let notes = bankerNotes || [];
     if (!notes.length) {
       const conn = getSalesforceConnection();
-      const query = "SELECT Banker_Notes__c FROM Appointment__c WHERE Contact__c = '003dM000005H5A7QAK' AND Banker_Notes__c != null ORDER BY CreatedDate DESC LIMIT 5";
+      const query = "SELECT Visit_Reason__c FROM Branch_Visit__c WHERE Contact__c = '003dM000005H5A7QAK' ORDER BY CreatedDate DESC";
       const result = await conn.query(query);
       notes = result.records.map(record => record.Banker_Notes__c).filter(Boolean);
+      console.log('Salesforce banker notes retrieved:', notes);
     }
+
+    // Preprocess visit reasons to remove extra details and focus on key intent
+    const simplifiedVisitReasons = visitReasons.map(reason =>
+      reason.replace(/:.*$/, '').trim() // Remove everything after ":"
+    ).filter(reason => reason.length > 0);
 
     // Prepare context for LLM
     const contextData = `
-Visit Reasons: ${visitReasons.join(', ')}
+Visit Reasons: ${simplifiedVisitReasons.join(', ')}
 Banker Notes: ${notes.join('; ') || 'No banker notes available.'}
 ${currentReason ? `Current Appointment Reason: ${currentReason}` : 'No current appointment reason provided.'}
 Available Product Categories: ${Object.keys(productMapping).join(', ')}
 `;
 
-    // LLM Prompt
+    // LLM Prompt with strict JSON enforcement
     const prompt = `
 You are a banking assistant tasked with recommending products based on a customer's visit history, banker notes, and current appointment reason. Use the following context to suggest up to 3 products from the available categories.
 
@@ -884,7 +889,8 @@ ${contextData}
 Rules:
 - Analyze the visit reasons, banker notes, and current appointment reason (if provided) to determine the customer's needs.
 - Recommend up to 3 products by selecting the most relevant product categories from: ${Object.keys(productMapping).join(', ')}.
-- Return the recommendations in JSON format with a "recommendations" array containing the category keys (e.g., "checking_account", "savings_account") and a "reason" explaining why these products were recommended.
+- Return ONLY a valid JSON object with a "recommendations" array containing the category keys (e.g., "checking_account", "savings_account") and a "reason" string explaining why these products were recommended.
+- Do NOT include any text outside the JSON object (e.g., no explanations, comments, or markdown).
 - Example response: {"recommendations": ["checking_account", "savings_account"], "reason": "Customer frequently visits to open accounts and manage savings."}
 `;
 
@@ -899,9 +905,13 @@ Rules:
     });
 
     const llmOutput = openaiResponse.choices[0].message.content.trim();
+    console.log('Raw LLM response:', llmOutput); // Log raw response for debugging
     let parsedResponse;
     try {
       parsedResponse = JSON.parse(llmOutput);
+      if (!parsedResponse.recommendations || !Array.isArray(parsedResponse.recommendations) || !parsedResponse.reason || typeof parsedResponse.reason !== 'string') {
+        throw new Error('Invalid JSON structure from LLM');
+      }
     } catch (error) {
       console.error('Failed to parse LLM response:', error.message);
       parsedResponse = { recommendations: [], reason: 'Error parsing LLM response.' };
@@ -919,12 +929,12 @@ Rules:
     // Fallback to defaults if no recommendations
     if (!recommendations.length) {
       recommendations.push(...defaultRecommendations.slice(0, 3));
-      parsedResponse.reason = 'No specific recommendations matched; providing default products.';
+      parsedResponse.reason = parsedResponse.reason || 'No specific recommendations matched; providing default products.';
     }
 
     res.json({
       recommendations: recommendations.slice(0, 3),
-      reason: parsedResponse.reason || 'Recommendations based on visit history and banker notes.',
+      reason: parsedResponse.reason,
     });
   } catch (error) {
     console.error('Error generating product recommendations:', error.message);

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Header from './components/Header';
 import AppointmentFlow from './components/AppointmentFlow';
 import ProductRecommendations from './components/ProductRecommendations';
+import ChatInterface, { ChatInterfaceHandle } from './components/ChatInterface';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -10,7 +11,9 @@ function App() {
   const [currentReason, setCurrentReason] = useState<string | undefined>(undefined);
   const [showChat, setShowChat] = useState(false);
 
-  // Check session on mount
+  // Create a ref that will be forwarded to AppointmentFlow and then to ChatInterface
+  const chatRef = useRef<ChatInterfaceHandle>(null);
+
   useEffect(() => {
     const checkSession = async () => {
       try {
@@ -40,7 +43,6 @@ function App() {
     checkSession();
   }, []);
 
-  // Handle login
   const handleLogin = async (username: string, password: string) => {
     try {
       const response = await fetch('http://localhost:3000/api/auth/login', {
@@ -64,7 +66,6 @@ function App() {
     }
   };
 
-  // Handle logout
   const handleLogout = async () => {
     try {
       await fetch('http://localhost:3000/api/auth/logout', {
@@ -81,7 +82,6 @@ function App() {
     }
   };
 
-  // Handle guest login
   const handleGuest = () => {
     setIsLoggedIn(true);
     setUserName('Guest');
@@ -89,32 +89,39 @@ function App() {
     setShowChat(true);
   };
 
-  // Handle booking an appointment from ProductRecommendations
+  // This handler is called when a product's "Book an Appointment" button is clicked.
+  // It sets the current reason and uses the forwarded chatRef to send a prompt to the ChatInterface.
   const handleBookAppointment = (reason: string) => {
+    console.log(`Booking appointment for: ${reason}`);
     setCurrentReason(reason);
     setShowChat(true); // Ensure chat is visible
-    // Optionally, you can trigger a message in ChatInterface to pre-fill the reason
+    if (chatRef.current) {
+      chatRef.current.handleSend(`Book an appointment to discuss ${reason}`);
+    } else {
+      console.error('Chat ref not available');
+    }
   };
 
   return (
     <div className="min-h-screen bg-gray-100">
       <Header />
       <main className="container mx-auto px-4 py-8 flex justify-center space-x-4">
-        {/* AppointmentFlow with Original Width */}
+        {/* AppointmentFlow with forwarded ref */}
         <div className="max-w-4xl">
           <AppointmentFlow
+            ref={chatRef}
             isLoggedIn={isLoggedIn}
             userName={userName}
             userType={userType}
             onLogin={handleLogin}
             onLogout={handleLogout}
             onGuest={handleGuest}
-            onReasonChange={setCurrentReason} // Pass callback to update currentReason
+            onReasonChange={setCurrentReason}
             showChat={showChat}
           />
         </div>
 
-        {/* Product Recommendations in White Space */}
+        {/* Product Recommendations */}
         <ProductRecommendations
           isLoggedIn={isLoggedIn}
           token={null}
