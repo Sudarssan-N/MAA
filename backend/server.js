@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'http://localhost:4173',
   credentials: true,
 }));
 
@@ -68,6 +68,12 @@ function formatDateTimeForDisplay(isoDateTime) {
   return formatted;
 }
 
+// NEW: Helper function to remove inline comments from a JSON string.
+function removeCommentsFromJSON(jsonStr) {
+  // This regex removes any inline comments (// ...) from the JSON string.
+  return jsonStr.replace(/\/\/.*(?=[\n\r])/g, '');
+}
+
 function extractJSON(str) {
   console.log('Extracting JSON from string:', str);
   const codeBlockRegex = /```(?:json)?\s*({[\s\S]*?})\s*```/;
@@ -75,9 +81,11 @@ function extractJSON(str) {
   
   if (codeBlockMatch && codeBlockMatch[1]) {
     try {
-      const parsed = JSON.parse(codeBlockMatch[1]);
+      // Remove comments before parsing
+      const cleaned = removeCommentsFromJSON(codeBlockMatch[1]);
+      const parsed = JSON.parse(cleaned);
       console.log('Successfully parsed JSON from code block:', parsed);
-      return codeBlockMatch[1];
+      return cleaned;
     } catch (e) {
       console.error('Error parsing JSON from code block:', e.message);
     }
@@ -89,9 +97,10 @@ function extractJSON(str) {
   if (matches) {
     for (const match of matches) {
       try {
-        const parsed = JSON.parse(match);
+        const cleaned = removeCommentsFromJSON(match);
+        const parsed = JSON.parse(cleaned);
         console.log('Successfully parsed JSON from regex match:', parsed);
-        return match;
+        return cleaned;
       } catch (e) {
         console.error('Error parsing JSON from regex match:', e.message);
       }
@@ -619,11 +628,8 @@ Rules:
 - Return JSON like: {"response": "Here's a suggestion...", "appointmentDetails": {...}}
 
 `;
-    // console.log('Generated prompt for OpenAI:', prompt);
-
     const systemPrompt = { role: 'system', content: prompt };
     const tempMessages = [...req.session.chatHistory, systemPrompt];
-    // console.log('Messages sent to OpenAI:', JSON.stringify(tempMessages, null, 2));
 
     const openaiResponse = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -660,7 +666,6 @@ Rules:
 
     const requiredFields = ['Reason_for_Visit__c', 'Appointment_Date__c', 'Appointment_Time__c', 'Location__c'];
     const missingFields = requiredFields.filter(field => !appointmentDetails[field]);
-    // console.log('Missing fields in appointment details:', missingFields);
 
     if (missingFields.length === 0) {
       const dateTime = combineDateTime(appointmentDetails.Appointment_Date__c, appointmentDetails.Appointment_Time__c);
@@ -680,13 +685,11 @@ Rules:
         ...(appointmentDetails.Banker__c && appointmentDetails.Banker__c.match(/^005/) && { Banker__c: appointmentDetails.Banker__c }),
       };
     
-      // console.log('Creating appointment in Salesforce with data:', JSON.stringify(fullAppointmentData, null, 2));
       const createResult = await conn.sobject('Appointment__c').create(fullAppointmentData);
       if (createResult.success) {
         appointmentId = createResult.id;
         appointmentDetails.Id = appointmentId;
         appointmentDetails.Appointment_Time__c = dateTime;
-        // console.log('Appointment created in Salesforce with ID:', appointmentId);
       } else {
         console.error('Failed to create appointment in Salesforce:', createResult);
         throw new Error('Failed to create appointment in Salesforce: ' + JSON.stringify(createResult.errors));
@@ -699,7 +702,6 @@ Rules:
       missingFields,
       previousAppointments: previousAppointments.length > 0 ? previousAppointments : undefined
     };
-    // console.log('Sending response to client:', JSON.stringify(responseData, null, 2));
     res.json(responseData);
   } catch (error) {
     console.error('Error processing chat request:', error.message);
@@ -734,7 +736,6 @@ app.get('/api/chat/state', optionalAuthenticate, (req, res) => {
     messages: req.session.chatHistory.filter(msg => msg.role !== 'system'),
     appointmentDetails: parsed.appointmentDetails || null
   };
-  // console.log('Sending chat state to client:', JSON.stringify(responseData, null, 2));
   res.json(responseData);
 });
 
@@ -757,7 +758,6 @@ app.post('/api/verify-confirmation', async (req, res) => {
       ...recentChatHistory.map(msg => ({ role: msg.type === 'user' ? 'user' : 'assistant', content: msg.text })),
     ];
 
-    // If userText is provided, add it to the messages
     if (text) {
       messages.splice(1, 0, { role: 'user', content: userText });
     }

@@ -126,7 +126,7 @@ const AppointmentFlow = () => {
         </div>
         {isLoggedIn && (
           <div className="text-sm text-gray-600 flex space-x-2">
-            <span>Welcome, {userName}</span>
+            <span>Welcome, Jack</span>
             <button
               onClick={handleLogout}
               className="text-red-500 hover:text-red-700 underline"
