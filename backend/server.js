@@ -352,6 +352,50 @@ app.post('/api/salesforce/appointments', authenticate, async (req, res) => {
   }
 });
 
+function parseOverrideDateTime(dateTimeStr) {
+  console.log('Parsing override date/time string:', dateTimeStr);
+  if (!dateTimeStr) return { date: null, time: null };
+
+  // Flexible regex for formats like "March 19th 10AM", "March 19 10:00 AM", etc.
+  const overrideRegex = /(\w+)\s+(\d{1,2}(?:th|st|nd|rd)?)(?:,?\s+(\d{4}))?\s+(\d{1,2}(?::\d{2})?\s*(AM|PM))/i;
+  const match = dateTimeStr.match(overrideRegex);
+
+  if (!match) {
+    console.log('Invalid override date/time format:', dateTimeStr);
+    return { date: null, time: null };
+  }
+
+  const [, monthStr, dayStr, yearStr, timeStr, modifier] = match;
+  const currentYear = new Date().getFullYear(); // Use 2025 based on current date (March 17, 2025)
+  const year = yearStr ? parseInt(yearStr, 10) : currentYear;
+
+  // Map month string to number
+  const monthMap = {
+    january: '01', jan: '01', february: '02', feb: '02', march: '03', mar: '03',
+    april: '04', apr: '04', may: '05', june: '06', jun: '06', july: '07', jul: '07',
+    august: '08', aug: '08', september: '09', sep: '09', october: '10', oct: '10',
+    november: '11', nov: '11', december: '12', dec: '12'
+  };
+  const month = monthMap[monthStr.toLowerCase()];
+  if (!month) {
+    console.log('Invalid month:', monthStr);
+    return { date: null, time: null };
+  }
+
+  const day = dayStr.replace(/(th|st|nd|rd)/i, '').padStart(2, '0');
+  const dateStr = `${year}-${month}-${day}`;
+
+  // Validate date
+  const dateObj = new Date(`${dateStr}T00:00:00.000Z`);
+  if (isNaN(dateObj.getTime())) {
+    console.log('Invalid date constructed:', dateStr);
+    return { date: null, time: null };
+  }
+
+  console.log('Parsed override date and time:', { date: dateStr, time: timeStr });
+  return { date: dateStr, time: timeStr };
+}
+
 app.post('/api/guidedFlow', async (req, res) => {
   try {
     const { query, customerType, guidedStep } = req.body;
@@ -363,53 +407,84 @@ app.post('/api/guidedFlow', async (req, res) => {
       return res.status(401).json({ message: 'Session expired or invalid', error: 'SESSION_EXPIRED' });
     }
 
-    // Initialize the guided flow data if not present
     initGuidedFlowSession(req);
+    const flowData = req.session.guidedFlow;
 
-    // We'll store the partial data in session so we can finalize at the "confirmation" step
-    const flowData = req.session.guidedFlow;  // { reason, date, time, location }
-
-    // We'll build a specialized system prompt based on the guidedStep
     let systemInstructions = '';
     switch (guidedStep) {
       case 'reasonSelection':
-        // LLM can propose times based on the reason
-        flowData.reason = query;  // store the reason in session
+        flowData.reason = query;
         systemInstructions = `
 User selected a reason: ${flowData.reason}.
-Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-10T16:00:00.000Z").
+Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-18T14:00:00.000Z").
 Return them under "timeSlots" array in JSON.
-Start the Dates from 10 march 2025 it is.
-Include a "response" that politely offers those slots, plus an "alternateDatesOption" if you wish.
+Start the Dates from March 16, 2025.
+Include a "response" that politely offers those slots.
         `;
         break;
 
       case 'timeSelection':
-        // The user presumably picks from the LLM-suggested times
-        flowData.time = query;  // store the chosen time in session (should be in ISO 8601 format)
+        let parsedTime = query;
+        if (!query.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)) {
+          // Not in ISO 8601 format, attempt to parse override input
+          const { date, time } = parseOverrideDateTime(query) || {};
+          parsedTime = date && time ? combineDateTime(date, time) : null;
+          if (!parsedTime) {
+            systemInstructions = `
+User entered an invalid time slot: ${query}.
+Respond with "I couldn’t understand that date/time. Please try a format like 'March 19th, 10 AM' or select from the suggestions."
+Return an empty "locationOptions" array.
+            `;
+            req.session.chatHistory.push({ role: 'system', content: systemInstructions });
+            req.session.chatHistory.push({ role: 'user', content: query });
+            const openaiResponse = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: req.session.chatHistory,
+              max_tokens: 500,
+              temperature: 0.7,
+            });
+            const llmOutput = openaiResponse.choices[0].message.content.trim();
+            req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
+            req.session.save(() => {});
+            let parsed;
+            try {
+              parsed = JSON.parse(llmOutput);
+            } catch (err) {
+              parsed = JSON.parse(extractJSON(llmOutput));
+            }
+            return res.json({
+              response: parsed.response || "I couldn’t understand that date/time. Please try again.",
+              appointmentDetails: null,
+              timeSlots: [],
+              locationOptions: parsed.locationOptions || [],
+            });
+          }
+        }
+        flowData.time = parsedTime;
         systemInstructions = `
 User selected the time slot: ${flowData.time}.
-Now we must gather the location. Provide 3 location options in "locationOptions": ["Brooklyn","Manhattan","New York"].
+Provide 3 location options in "locationOptions": ["Brooklyn", "Manhattan", "New York"].
 Return them in a JSON array. Also provide a "response" to ask the user to choose a location.
         `;
         break;
 
       case 'locationSelection':
-        // The user picks a location
-        flowData.location = query;  // store the chosen location in session
+        flowData.location = query;
         systemInstructions = `
 User selected location: ${flowData.location}.
 Now we have reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a "response" summarizing these choices and ask for confirmation. 
-Include something like "Please confirm your appointment."
+Return a "response" summarizing these choices and ask for confirmation.
+Include "Please confirm your appointment."
         `;
         break;
 
       case 'confirmation':
-        // The user confirms the final details. Now we create the appointment in Salesforce.
         systemInstructions = `
 The user confirmed the appointment with reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a short "response" that the appointment is being booked. 
+Return a "response" confirming the booking.
+Return "appointmentDetails" in JSON with fields: "Id" (leave null for now), "Reason_for_Visit__c", "Appointment_Time__c" (use the ISO 8601 time), "Location__c".
+Do not include "Appointment_Date__c".
+Example: {"response": "Your appointment is booked!", "appointmentDetails": {"Id": null, "Reason_for_Visit__c": "Open a new account", "Appointment_Time__c": "2025-03-18T14:00:00.000Z", "Location__c": "Brooklyn"}}
         `;
         break;
 
@@ -418,14 +493,12 @@ Return a short "response" that the appointment is being booked.
         break;
     }
 
-    // Add system prompt
     if (!req.session.chatHistory) {
       req.session.chatHistory = [];
     }
     req.session.chatHistory.push({ role: 'system', content: systemInstructions });
     req.session.chatHistory.push({ role: 'user', content: query });
 
-    // Call OpenAI with your messages
     const openaiResponse = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: req.session.chatHistory,
@@ -437,7 +510,6 @@ Return a short "response" that the appointment is being booked.
     req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
     req.session.save(() => {});
 
-    // Attempt to parse the LLM JSON
     let parsed;
     try {
       parsed = JSON.parse(llmOutput);
@@ -445,7 +517,6 @@ Return a short "response" that the appointment is being booked.
       parsed = JSON.parse(extractJSON(llmOutput));
     }
 
-    // Format timeSlots for display
     let formattedTimeSlots = [];
     if (parsed.timeSlots && Array.isArray(parsed.timeSlots)) {
       formattedTimeSlots = parsed.timeSlots.map(slot => ({
@@ -454,18 +525,14 @@ Return a short "response" that the appointment is being booked.
       }));
     }
 
-    // If we're at confirmation, create the record in Salesforce
-    let appointmentDetails = null;
+    let appointmentDetails = parsed.appointmentDetails || null;
     if (guidedStep === 'confirmation') {
       try {
-        // Since flowData.time is already in ISO 8601 format (e.g., "2023-10-27T16:00:00.000Z")
         const dateTime = flowData.time;
-        if (!dateTime) {
-          console.error('Missing date/time in confirmation step');
+        if (!dateTime || !dateTime.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)) {
           throw new Error('Invalid date/time format');
         }
 
-        // Create the record in SF
         const conn = getSalesforceConnection();
         const newAppointment = {
           Reason_for_Visit__c: flowData.reason,
@@ -482,12 +549,11 @@ Return a short "response" that the appointment is being booked.
             Appointment_Time__c: dateTime,
             Location__c: flowData.location
           };
+          parsed.response = parsed.response || "Your appointment has been booked successfully!";
         } else {
-          console.error('SF creation failed:', result);
           throw new Error('Failed to create appointment in Salesforce');
         }
 
-        // Clear the session data
         req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
       } catch (error) {
         console.error('Error creating appointment in SF:', error);
@@ -495,10 +561,9 @@ Return a short "response" that the appointment is being booked.
       }
     }
 
-    // Return the LLM's response plus any additional data
     const responsePayload = {
       response: parsed.response || '...',
-      appointmentDetails: appointmentDetails || parsed.appointmentDetails || null,
+      appointmentDetails,
       timeSlots: formattedTimeSlots,
       locationOptions: parsed.locationOptions || [],
       alternateDatesOption: parsed.alternateDatesOption || null
