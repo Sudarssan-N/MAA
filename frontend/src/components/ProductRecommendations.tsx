@@ -109,7 +109,7 @@ const ProductRecommendations: React.FC<ProductRecommendationsProps> = ({
       
       const recommendationData = await recommendationResponse.json();
       setProductRecommendations(recommendationData.recommendations.slice(0, 3));
-      setRecommendationReason(recommendationData.reason);
+      setRecommendationReason('Based on the past interactions with your banker. Click to book an appointment.');
       setHasFetchedInitialData(true); // Mark as fetched
     } catch (error) {
       console.error('Error fetching product recommendations:', error);

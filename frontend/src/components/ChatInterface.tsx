@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Send, MessageSquare, AlertCircle, CheckCircle, Mic } from 'lucide-react';
+import { Send, MessageSquare, AlertCircle, CheckCircle, Mic, Bookmark } from 'lucide-react';
 import clsx from 'clsx';
 
 // SpeechRecognition support
@@ -17,6 +17,7 @@ interface ChatInterfaceProps {
   token?: string | null;
   isGuidedMode: boolean;
   onReasonChange: (reason: string | undefined) => void;
+  onTonToggleRecommendations: () => void;
 }
 
 export interface ChatInterfaceHandle {
@@ -94,6 +95,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   token,
   isGuidedMode,
   onReasonChange,
+  onToggleRecommendations, // Destructure new prop
 }, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -697,7 +699,15 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
       <div className="p-4 border-t bg-gray-50">
         {/* Add Start Over Button at the top of the input area */}
-        <div className="flex justify-end mb-2">
+        <div className="flex justify-end mb-2 space-x-2">
+          <button
+            onClick={onToggleRecommendations}
+            disabled={isProcessing || sessionError}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 flex items-center space-x-1"
+          >
+            <Bookmark className="w-5 h-5" />
+            <span>Recommendations</span>
+          </button>
           <button
             onClick={resetSession}
             disabled={isProcessing || sessionError}

@@ -4,7 +4,6 @@ import { Calendar, Lock, UserCheck } from 'lucide-react';
 import ChatInterface, { ChatInterfaceHandle } from './ChatInterface';
 import LoginModal from './LoginModal';
 
-// Define props with ref
 interface AppointmentFlowProps {
   isLoggedIn: boolean;
   userName: string | null;
@@ -14,9 +13,9 @@ interface AppointmentFlowProps {
   onGuest: () => void;
   onReasonChange: (reason: string | undefined) => void;
   showChat: boolean;
+  onToggleRecommendations: () => void; // New prop
 }
 
-// Use forwardRef to pass ref to ChatInterface
 const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
   isLoggedIn,
   userName,
@@ -26,6 +25,7 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
   onGuest,
   onReasonChange,
   showChat,
+  onToggleRecommendations, // Destructure new prop
 }, ref) => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(true);
   const [isGuidedMode, setIsGuidedMode] = useState(false);
@@ -132,13 +132,14 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
                 className="h-full"
               >
                 <ChatInterface
-                  ref={ref} // Forward the ref from App
+                  ref={ref}
                   isLoggedIn={isLoggedIn}
                   userName={userName || 'Guest'}
                   userType={userType}
                   token={null}
                   isGuidedMode={isGuidedMode}
                   onReasonChange={onReasonChange}
+                  onToggleRecommendations={onToggleRecommendations} // Pass down to ChatInterface
                 />
               </motion.div>
             )}

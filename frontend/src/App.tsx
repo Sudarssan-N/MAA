@@ -10,8 +10,8 @@ function App() {
   const [userType, setUserType] = useState<'guest' | 'customer' | null>(null);
   const [currentReason, setCurrentReason] = useState<string | undefined>(undefined);
   const [showChat, setShowChat] = useState(false);
+  const [showRecommendations, setShowRecommendations] = useState(false); // State to toggle recommendations
 
-  // Create a ref that will be forwarded to AppointmentFlow and then to ChatInterface
   const chatRef = useRef<ChatInterfaceHandle>(null);
 
   useEffect(() => {
@@ -77,6 +77,7 @@ function App() {
       setUserType(null);
       setShowChat(false);
       setCurrentReason(undefined);
+      setShowRecommendations(false);
     } catch (error) {
       console.error('Error logging out:', error);
     }
@@ -89,12 +90,10 @@ function App() {
     setShowChat(true);
   };
 
-  // This handler is called when a product's "Book an Appointment" button is clicked.
-  // It sets the current reason and uses the forwarded chatRef to send a prompt to the ChatInterface.
   const handleBookAppointment = (reason: string) => {
     console.log(`Booking appointment for: ${reason}`);
     setCurrentReason(reason);
-    setShowChat(true); // Ensure chat is visible
+    setShowChat(true);
     if (chatRef.current) {
       chatRef.current.handleSend(`Book an appointment to discuss ${reason}`);
     } else {
@@ -102,11 +101,15 @@ function App() {
     }
   };
 
+  const toggleRecommendations = () => {
+    setShowRecommendations(prev => !prev);
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <Header />
       <main className="container mx-auto px-4 py-8 flex justify-center space-x-4">
-        {/* AppointmentFlow with forwarded ref */}
+        {/* AppointmentFlow with fixed size */}
         <div className="max-w-4xl">
           <AppointmentFlow
             ref={chatRef}
@@ -118,17 +121,22 @@ function App() {
             onGuest={handleGuest}
             onReasonChange={setCurrentReason}
             showChat={showChat}
+            onToggleRecommendations={toggleRecommendations}
           />
         </div>
 
-        {/* Product Recommendations */}
-        <ProductRecommendations
-          isLoggedIn={isLoggedIn}
-          token={null}
-          userType={userType}
-          currentReason={currentReason}
-          onBookAppointment={handleBookAppointment}
-        />
+        {/* Product Recommendations (shown only when toggled) */}
+        {showRecommendations && (
+          <div className="max-w-md transition-all duration-300">
+            <ProductRecommendations
+              isLoggedIn={isLoggedIn}
+              token={null}
+              userType={userType}
+              currentReason={currentReason}
+              onBookAppointment={handleBookAppointment}
+            />
+          </div>
+        )}
       </main>
     </div>
   );
