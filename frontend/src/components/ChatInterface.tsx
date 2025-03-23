@@ -706,7 +706,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
             className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 flex items-center space-x-1"
           >
             <Bookmark className="w-5 h-5" />
-            <span>Recommendations</span>
+            <span>Suggested Appointments</span>
           </button>
           <button
             onClick={resetSession}

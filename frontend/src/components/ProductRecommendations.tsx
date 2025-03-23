@@ -109,7 +109,7 @@ const ProductRecommendations: React.FC<ProductRecommendationsProps> = ({
       
       const recommendationData = await recommendationResponse.json();
       setProductRecommendations(recommendationData.recommendations.slice(0, 3));
-      setRecommendationReason('Based on the past interactions with your banker. Click to book an appointment.');
+      setRecommendationReason('Considering your prior engagements with your bank, we recommend the following appointment options for you to have a look at. Please feel free to select any of these to help speed up the scheduling process.');
       setHasFetchedInitialData(true); // Mark as fetched
     } catch (error) {
       console.error('Error fetching product recommendations:', error);
@@ -148,7 +148,7 @@ const ProductRecommendations: React.FC<ProductRecommendationsProps> = ({
 
   return (
     <div className="w-full max-w-md p-4 bg-white rounded-lg shadow-lg">
-      <h2 className="text-xl font-semibold mb-4 text-gray-800">Product Recommendations</h2>
+      <h2 className="text-xl font-semibold mb-4 text-gray-800">Suggested Appointments</h2>
       {recommendationReason && (
         <p className="text-sm text-gray-600 mb-4 italic">{recommendationReason}</p>
       )}
