@@ -415,11 +415,9 @@ app.post('/api/guidedFlow', async (req, res) => {
       case 'reasonSelection':
         flowData.reason = query;
         systemInstructions = `
-User selected a reason: ${flowData.reason}.
-Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-18T14:00:00.000Z").
-Return them under "timeSlots" array in JSON.
-Start the Dates from March 16, 2025.
-Include a "response" that politely offers those slots.
+        User selected a reason: ${flowData.reason}.
+        Provide 3 location options in "locationOptions": [ "Manhattan", "New York", "Brooklyn"].
+        Return them in a JSON array. Also provide a "response" to ask the user to choose a location.
         `;
         break;
 
@@ -432,7 +430,7 @@ Include a "response" that politely offers those slots.
           if (!parsedTime) {
             systemInstructions = `
 User entered an invalid time slot: ${query}.
-Respond with "I couldn’t understand that date/time. Please try a format like 'March 19th, 10 AM' or select from the suggestions."
+Respond with the time slotthat he/she has selected. 
 Return an empty "locationOptions" array.
             `;
             req.session.chatHistory.push({ role: 'system', content: systemInstructions });
@@ -462,21 +460,23 @@ Return an empty "locationOptions" array.
         }
         flowData.time = parsedTime;
         systemInstructions = `
-User selected the time slot: ${flowData.time}.
-Provide 3 location options in "locationOptions": ["Brooklyn", "Manhattan", "New York"].
-Return them in a JSON array. Also provide a "response" to ask the user to choose a location.
+        User selected the time slot: ${flowData.time}.
+        Now we have reason = ${flowData.reason}, location = ${flowData.location}, time = ${flowData.time}.
+        Return a "response" summarizing these choices and ask for confirmation.
+        Include "Please confirm your appointment."
         `;
         break;
 
-      case 'locationSelection':
-        flowData.location = query;
-        systemInstructions = `
-User selected location: ${flowData.location}.
-Now we have reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a "response" summarizing these choices and ask for confirmation.
-Include "Please confirm your appointment."
-        `;
-        break;
+        case 'locationSelection':
+          flowData.location = query;
+          systemInstructions = `
+          User selected location: ${flowData.location}.
+          Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-18T14:00:00.000Z").
+          Return them under "timeSlots" array in JSON.
+          Start the Dates from April 22, 2025.
+          Include a "response" that politely offers those slots.
+          `;
+          break;
 
       case 'confirmation':
         systemInstructions = `
@@ -680,7 +680,7 @@ Extract or suggest:
 - Reason_for_Visit__c (Ask customer if not mentioned, suggest from the previous bookings if available)
 - Appointment_Date__c (YYYY-MM-DD)
 - Appointment_Time__c (HH:MM AM/PM)
-- Location__c (Brooklyn, Manhattan, or New York)
+- Location__c (Brooklyn, Manhattan, or New York) Ask for Location before going with the time suggestion. Get the location second to the reason for the visit, then time. 
 - Banker__c (use the Preferred Banker ID from context if available, otherwise omit it unless specified)
 
 Rules:

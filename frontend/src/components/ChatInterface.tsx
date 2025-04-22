@@ -369,12 +369,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
           case 'reason':
             await handleReasonSelection(text);
             break;
+          case 'location':
+            await handleLocationSelection(text);
+            break;
           case 'date':
             const customSlot = { display: text, raw: text };
             await handleTimeSelection(customSlot);
-            break;
-          case 'location':
-            await handleLocationSelection(text);
             break;
           case 'confirmation':
             if (text.toLowerCase().includes('confirm')) {
@@ -419,19 +419,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
     setIsProcessing(true);
     try {
       const data = await callGuidedFlow(reason, 'reasonSelection');
-      if (data.timeSlots && Array.isArray(data.timeSlots)) {
-        setLLMDateSuggestions(data.timeSlots);
+      if (data.locationOptions && Array.isArray(data.locationOptions)) {
+        setLLMLocationOptions(data.locationOptions);
       }
       setMessages(prev => [
         ...prev.filter(msg => !msg.isLoading),
-        { type: 'assistant', text: data.response || "Here are some suggested appointment slots..." }
+        { type: 'assistant', text: data.response || "Please choose a location." }
       ]);
-      setGuidedStep('date');
+      setGuidedStep('location');
     } catch (error) {
       console.error('Error in guided flow (reason):', error);
       setMessages(prev => [...prev, {
         type: 'assistant',
-        text: 'Error retrieving date suggestions. Please try again.'
+        text: 'Error retrieving location options. Please try again.'
       }]);
     } finally {
       setIsProcessing(false);
@@ -444,19 +444,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
     setIsProcessing(true);
     try {
       const data = await callGuidedFlow(slot.raw, 'timeSelection');
-      if (data.locationOptions && Array.isArray(data.locationOptions)) {
-        setLLMLocationOptions(data.locationOptions);
-      }
       setMessages(prev => [
         ...prev.filter(msg => !msg.isLoading),
-        { type: 'assistant', text: data.response || "Please choose a location." }
+        { type: 'assistant', text: data.response || "Confirm your appointment details?" }
       ]);
-      setGuidedStep('location');
+      setGuidedStep('confirmation');
     } catch (error) {
       console.error('Error selecting time:', error);
       setMessages(prev => [...prev, {
         type: 'assistant',
-        text: 'Could not fetch location options. Please try again.'
+        text: 'Could not finalize time step. Please try again.'
       }]);
     } finally {
       setIsProcessing(false);
@@ -466,7 +463,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
   const handleRefreshSlots = async () => {
     setIsProcessing(true);
     try {
-      const data = await callGuidedFlow(selectedReason, 'reasonSelection');
+      const data = await callGuidedFlow(selectedLocation, 'locationSelection');
       if (data.timeSlots && Array.isArray(data.timeSlots)) {
         setLLMDateSuggestions(data.timeSlots);
       }
@@ -488,16 +485,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
     setIsProcessing(true);
     try {
       const data = await callGuidedFlow(loc, 'locationSelection');
+      if (data.timeSlots && Array.isArray(data.timeSlots)) {
+        setLLMDateSuggestions(data.timeSlots);
+      }
       setMessages(prev => [
         ...prev.filter(msg => !msg.isLoading),
-        { type: 'assistant', text: data.response || "Confirm your appointment details?" }
+        { type: 'assistant', text: data.response || "Here are some suggested appointment slots..." }
       ]);
-      setGuidedStep('confirmation');
+      setGuidedStep('date');
     } catch (error) {
       console.error('Error selecting location:', error);
       setMessages(prev => [...prev, {
         type: 'assistant',
-        text: 'Could not finalize location step. Please try again.'
+        text: 'Could not fetch time slots. Please try again.'
       }]);
     } finally {
       setIsProcessing(false);
@@ -760,8 +760,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ isLoggedIn, userName, use
                 <p className="mb-2 font-medium">Review your details before confirming:</p>
                 <div className="p-4 border rounded-lg bg-gray-100 text-sm space-y-1">
                   <p><strong>Reason:</strong> {selectedReason}</p>
-                  <p><strong>Date/Time:</strong> {selectedDateTime.display}</p>
                   <p><strong>Location:</strong> {selectedLocation}</p>
+                  <p><strong>Date/Time:</strong> {selectedDateTime.display}</p>
                 </div>
                 <div className="flex gap-2 mt-4">
                   <button
