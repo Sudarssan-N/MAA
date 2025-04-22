@@ -63,7 +63,7 @@ const GUIDED_REASONS = [
   "Save for retirement",
 ];
 
-type GuidedStep = 'reason' | 'date' | 'location' | 'confirmation' | 'completed';
+type GuidedStep = 'reason' | 'date' | 'location' | 'confirmation' | 'completed' | 'reasonSelection' | 'locationSelection' | 'timeSelection';
 
 function formatAppointmentTime(isoDateTime: string | null): string {
   if (!isoDateTime) return '(Not specified)';
