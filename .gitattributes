@@ -1,4 +1,6 @@
 Insights_360_Gemini_March.mp4 filter=lfs diff=lfs merge=lfs -text
 Insights_360_Gemini_March.mp4
  filter=lfs diff=lfs merge=lfs -text
-ProductRecommendation.mp4 filter=lfs diff=lfs merge=lfs -text
+NonGuideModed_Review.mp4 filter=lfs diff=lfs merge=lfs -text
+NonGuideMode_v1.mp4 filter=lfs diff=lfs merge=lfs -text
+NonGuideModed_v1.mp4 filter=lfs diff=lfs merge=lfs -text
