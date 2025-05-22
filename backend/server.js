@@ -8,10 +8,31 @@ const session = require('express-session');
 const app = express();
 app.use(express.json());
 
-app.use(cors({
-  origin: 'http://localhost:4173',
+// Enable CORS with more permissive settings for development
+const corsOptions = {
+  origin: function (origin, callback) {
+    console.log('Origin making request:', origin);
+    // Allow all origins for development
+    callback(null, true);
+    
+    // For production, you should uncomment and modify this:
+    // const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:55032', 'http://localhost:55032'];
+    // if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    //   callback(null, true);
+    // } else {
+    //   callback(new Error('Not allowed by CORS'));
+    // }
+  },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
+};
+
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
 
 app.use(session({
   secret: process.env.SESSION_SECRET,
@@ -649,6 +670,7 @@ Rules:
 - Use prior appointments to infer preferences for Regular customers.
 - Respond in natural language under "response" and provide structured data under "appointmentDetails".
 - Return JSON like: {"response": "Here's a suggestion...", "appointmentDetails": {...}}
+- If the user has already entered all the required details, do not ask for them again.
 
 `;
     // console.log('Generated prompt for OpenAI:', prompt);
@@ -692,7 +714,61 @@ Rules:
 
     const requiredFields = ['Reason_for_Visit__c', 'Appointment_Date__c', 'Appointment_Time__c', 'Location__c'];
     const missingFields = requiredFields.filter(field => !appointmentDetails[field]);
-    // console.log('Missing fields in appointment details:', missingFields);
+    console.log('Initial missing fields:', missingFields);
+    
+    // If we have missing fields, use the LLM to extract them from the conversation
+    if (missingFields.length > 0 && response) {
+      console.log('Attempting to extract missing fields using LLM');
+      
+      // Build a conversation history for context
+      const conversationHistory = req.session.chatHistory
+        .filter(msg => msg.role !== 'system')
+        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.role === 'assistant' ? JSON.parse(msg.content).response || msg.content : msg.content}`)
+        .join('\n');
+      
+      // Create a prompt specifically for parameter extraction
+      const extractionPrompt = `
+      You are a parameter extraction assistant. Based on the conversation history below, extract the following appointment details:
+      ${missingFields.join(', ')}
+      
+      Conversation history:
+      ${conversationHistory}
+      
+      Latest response: ${response}
+      
+      Return ONLY a valid JSON object with the extracted parameters. For example:
+      {
+        "Reason_for_Visit__c": "Account assistance",
+        "Appointment_Date__c": "2025-05-23",
+        "Appointment_Time__c": "9:00 AM",
+        "Location__c": "Brooklyn"
+      }
+      
+      Only include the parameters that were requested. Format dates as YYYY-MM-DD and times as HH:MM AM/PM.
+      `;
+      
+      try {
+        const extractionResponse = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'system', content: extractionPrompt }],
+          max_tokens: 200,
+          temperature: 0.3,
+          response_format: { type: "json_object" }
+        });
+        
+        const extractedParams = JSON.parse(extractionResponse.choices[0].message.content.trim());
+        console.log('LLM extracted parameters:', extractedParams);
+        
+        // Merge the extracted parameters with the existing appointmentDetails
+        Object.assign(appointmentDetails, extractedParams);
+        
+        // Update the missing fields list
+        const updatedMissingFields = requiredFields.filter(field => !appointmentDetails[field]);
+        console.log('Missing fields after LLM extraction:', updatedMissingFields);
+      } catch (extractionError) {
+        console.error('Error extracting parameters with LLM:', extractionError);
+      }
+    }
 
     if (missingFields.length === 0) {
       const dateTime = combineDateTime(appointmentDetails.Appointment_Date__c, appointmentDetails.Appointment_Time__c);
@@ -937,8 +1013,122 @@ Rules:
       reason: parsedResponse.reason,
     });
   } catch (error) {
-    console.error('Error generating product recommendations:', error.message);
-    res.status(500).json({ message: 'Failed to generate product recommendations', error: error.message });
+    console.error('Error generating suggested replies:', error);
+    res.status(500).json({
+      message: 'Failed to generate suggested replies',
+      error: error.message,
+      suggestions: ["Book an appointment", "Find nearest branch", "I need help"]
+    });
+  }
+});
+
+// New endpoint for generating dynamic quick reply suggestions
+app.post('/api/suggestedReplies', async (req, res) => {
+  try {
+    const { chatHistory, userQuery, userType, sfData } = req.body;
+    
+    if (!chatHistory || !userQuery) {
+      return res.status(400).json({ message: 'Missing required parameters' });
+    }
+
+    // Format chat history for the LLM
+    const formattedChatHistory = chatHistory.map(msg => {
+      return `${msg.type === 'user' ? 'User' : 'Assistant'}: ${msg.text}`;
+    }).join('\n');
+
+    // Format Salesforce data if available
+    let sfContext = '';
+    if (sfData) {
+      if (sfData.appointments && sfData.appointments.length > 0) {
+        sfContext += '\nUpcoming Appointments:\n';
+        sfData.appointments.forEach(appt => {
+          sfContext += `- ${appt.Reason_for_Visit__c || 'General Consultation'} on ${formatDateTimeForDisplay(appt.Appointment_Date__c)} at ${appt.Location__c || 'Main Branch'}\n`;
+        });
+      }
+      
+      if (sfData.customerInfo) {
+        sfContext += '\nCustomer Information:\n';
+        sfContext += `- Type: ${sfData.customerInfo.Customer_Type__c || userType}\n`;
+        sfContext += `- Preferred Branch: ${sfData.customerInfo.Preferred_Branch__c || 'Not specified'}\n`;
+      }
+    }
+
+    // System prompt to guide the LLM's behavior
+    const systemPrompt = `
+    You are a banking assistant that generates contextually relevant quick reply suggestions for users.
+    Based on the conversation history and user's latest query, generate 3 short, helpful suggested replies.
+    
+    Guidelines for suggested replies:
+    1. Keep suggestions brief and actionable (max 5-7 words)
+    2. Make them contextually relevant to the conversation
+    3. Include options that help the user progress in their banking journey
+    4. If the user is asking about appointments, include appointment-related suggestions
+    5. If the user is asking about branches, include branch-related suggestions
+    6. If the user seems confused, include a "Tell me more" option
+    7. If the user is in the middle of a booking flow, include options to continue or restart
+    8. NEVER include explanations or any text outside the JSON format
+    
+    ${sfContext}
+    `;
+
+    // Call OpenAI API to generate suggestions
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Conversation History:\n${formattedChatHistory}\n\nLatest User Query: ${userQuery}\n\nGenerate 3 contextually relevant quick reply suggestions.` }
+      ],
+      max_tokens: 150,
+      temperature: 0.7,
+      response_format: { type: "json_object" }
+    });
+
+    // Parse the response
+    const responseContent = openaiResponse.choices[0].message.content.trim();
+    let suggestions = [];
+    
+    try {
+      const parsedResponse = JSON.parse(responseContent);
+      suggestions = parsedResponse.suggestions || [];
+      
+      // Ensure we have exactly 3 suggestions
+      if (suggestions.length > 3) {
+        suggestions = suggestions.slice(0, 3);
+      } else if (suggestions.length < 3) {
+        // Add default suggestions if we don't have enough
+        const defaultSuggestions = [
+          "Book an appointment",
+          "Find nearest branch",
+          "Check my appointments"
+        ];
+        
+        while (suggestions.length < 3) {
+          const defaultSuggestion = defaultSuggestions[suggestions.length];
+          if (!suggestions.includes(defaultSuggestion)) {
+            suggestions.push(defaultSuggestion);
+          } else {
+            suggestions.push("I need help");
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing suggestions:', error);
+      // Fallback to default suggestions
+      suggestions = [
+        "Book an appointment",
+        "Find nearest branch",
+        "Check my appointments"
+      ];
+    }
+
+    res.json({ suggestions });
+  } catch (error) {
+    console.error('Error generating suggested replies:', error);
+    res.status(500).json({
+      message: 'Failed to generate suggested replies',
+      error: error.message,
+      suggestions: ["Book an appointment", "Find nearest branch", "I need help"]
+    });
   }
 });
 
