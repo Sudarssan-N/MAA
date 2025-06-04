@@ -313,6 +313,175 @@ app.get('/api/session-health', (req, res) => {
   }
 });
 
+app.post('/api/guided-appointment', optionalAuthenticate, async (req, res) => {
+  console.log('Received guided appointment request:', JSON.stringify(req.body, null, 2));
+  try {
+    const { step, customerType, reason, dateTime, location, query } = req.body;
+    if (!step || !customerType) {
+      return res.status(400).json({ message: 'Missing step or customerType' });
+    }
+
+    let conn;
+    try {
+      conn = getSalesforceConnection();
+    } catch (error) {
+      return res.status(500).json({ message: 'Salesforce connection failed' });
+    }
+
+    let responseData = { 
+      prompt: '', 
+      suggestedDateTimes: null, 
+      suggestedLocation: null, 
+      appointmentDetails: null,
+      missingFields: [],
+      updatedGuidedData: null
+    };
+
+    const isRegularCustomer = customerType === 'Regular';
+    let previousAppointments = [];
+
+    if (isRegularCustomer) {
+      const query = 'SELECT Id, Reason_for_Visit__c, Appointment_Time__c, Location__c, Banker__c, CreatedDate ' +
+                    'FROM Appointment__c WHERE Contact__c = \'003dM000005H5A7QAK\' ORDER BY CreatedDate DESC LIMIT 5';
+      const result = await conn.query(query);
+      previousAppointments = result.records;
+    }
+
+    const prompt = `
+      Current Date: ${new Date().toISOString().split('T')[0]}
+      Step: ${step}
+      Customer Type: ${customerType}
+      Reason: ${reason || 'Not provided'}
+      DateTime: ${dateTime || 'Not provided'}
+      Location: ${location || 'Not provided'}
+      Query: ${query || 'Not provided'}
+      Previous Appointments: ${JSON.stringify(previousAppointments, null, 2)}
+
+      Provide structured suggestions and a natural language prompt based on the step and query:
+      - For 'reason': Return a prompt like "Please select a reason for your visit." and suggest reasons if no reason is set.
+      - For 'dateTime': Suggest 3 available date/time slots (YYYY-MM-DD HH:MM) based on reason, previous appointments, and business hours (9 AM - 5 PM), with a prompt like "Please select a date and time for your appointment." If query is "Suggest different time slots" or "I need a different time slot", generate 3 new unique slots (avoiding previously suggested times). If query adjusts the time (e.g., "Change to 2pm" or "I want 2pm"), update dateTime to the closest available time (e.g., "2025-03-09 14:00") and move to the next step.
+      - For 'location': Suggest a location (Brooklyn, Manhattan, or New York) based on the most frequent previous location or default to 'Manhattan', with a prompt like "Your preferred location is [location]. Confirm or choose another?" If query adjusts the location (e.g., "Use Manhattan"), update location.
+      - For 'confirmation': Validate required fields (Reason_for_Visit__c, Appointment_Time__c, Location__c), create the appointment if valid, and return a prompt like "Appointment confirmed!" or list missing fields. If query suggests changes (e.g., "Start over"), reset guided data.
+      - If query provides new information (e.g., "Change the time to 2pm" or "Use Manhattan"), update the relevant field in updatedGuidedData and suggest the next step. If query requests new time slots, return new suggestedDateTimes.
+
+      Return JSON like: {
+        "prompt": "Natural language prompt",
+        "suggestedDateTimes": ["YYYY-MM-DD HH:MM", ...],
+        "suggestedLocation": "Location",
+        "appointmentDetails": {...},
+        "missingFields": [],
+        "updatedGuidedData": { reason: string, dateTime: string, location: string } // Optional updates
+      }
+    `;
+
+    const systemPrompt = { role: 'system', content: prompt };
+    const tempMessages = [systemPrompt];
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: tempMessages,
+      max_tokens: 300,
+      temperature: 0.3,
+    });
+    const llmOutput = openaiResponse.choices[0].message.content.trim();
+    const parsedResponse = JSON.parse(extractJSON(llmOutput));
+
+    switch (step) {
+      case 'reason':
+        responseData.prompt = parsedResponse.prompt || "Please select a reason for your visit.";
+        break;
+      case 'dateTime':
+        responseData.prompt = parsedResponse.prompt || "Please select a date and time for your appointment.";
+        responseData.suggestedDateTimes = parsedResponse.suggestedDateTimes || [
+          `${new Date().toISOString().split('T')[0]} 10:00`,
+          `${new Date().toISOString().split('T')[0]} 14:00`,
+          `${new Date().toISOString().split('T')[0]} 16:00`,
+        ];
+        if (query && (query.toLowerCase().includes('suggest different') || query.toLowerCase().includes('different time'))) {
+          // Generate new unique slots (example logic, enhance with actual availability check)
+          const newSlots = generateUniqueTimeSlots(responseData.suggestedDateTimes || []);
+          responseData.suggestedDateTimes = newSlots;
+          responseData.prompt = "Here are some different time slots. Please select one.";
+        }
+        break;
+      case 'location':
+        responseData.prompt = parsedResponse.prompt || `Your preferred location is ${parsedResponse.suggestedLocation}. Confirm or choose another?`;
+        responseData.suggestedLocation = parsedResponse.suggestedLocation || 'Manhattan';
+        break;
+      case 'confirmation':
+        const requiredFields = ['Reason_for_Visit__c', 'Appointment_Time__c', 'Location__c'];
+        const appointmentDetails = {
+          Reason_for_Visit__c: reason || parsedResponse.updatedGuidedData?.reason,
+          Appointment_Time__c: dateTime || parsedResponse.updatedGuidedData?.dateTime,
+          Location__c: location || parsedResponse.updatedGuidedData?.location,
+          Contact__c: '003dM000005H5A7QAK',
+        };
+        const missingFields = requiredFields.filter(field => !appointmentDetails[field]);
+        if (missingFields.length > 0) {
+          responseData.missingFields = missingFields;
+          responseData.prompt = `Missing fields: ${missingFields.join(', ')}. Please try again.`;
+        } else {
+          const dateTimeObj = new Date(appointmentDetails.Appointment_Time__c);
+          if (isNaN(dateTimeObj.getTime())) {
+            responseData.missingFields = ['Appointment_Time__c'];
+            responseData.prompt = 'Invalid date/time format. Please try again.';
+          } else {
+            appointmentDetails.Appointment_Time__c = dateTimeObj.toISOString();
+            const createResult = await conn.sobject('Appointment__c').create(appointmentDetails);
+            if (createResult.success) {
+              responseData.appointmentDetails = { ...appointmentDetails, Id: createResult.id };
+              responseData.prompt = "Appointment confirmed!";
+            } else {
+              throw new Error('Failed to create appointment');
+            }
+          }
+        }
+        break;
+    }
+
+    // Apply updates from query if provided
+    if (parsedResponse.updatedGuidedData) {
+      responseData.updatedGuidedData = parsedResponse.updatedGuidedData;
+      if (step === 'dateTime' && parsedResponse.suggestedDateTimes) {
+        responseData.suggestedDateTimes = parsedResponse.suggestedDateTimes;
+      }
+      if (responseData.updatedGuidedData.reason && !responseData.updatedGuidedData.dateTime) {
+        responseData.prompt = "Please select a date and time for your appointment.";
+        responseData.suggestedDateTimes = responseData.suggestedDateTimes || [
+          `${new Date().toISOString().split('T')[0]} 10:00`,
+          `${new Date().toISOString().split('T')[0]} 14:00`,
+          `${new Date().toISOString().split('T')[0]} 16:00`,
+        ];
+      } else if (responseData.updatedGuidedData.dateTime && !responseData.updatedGuidedData.location) {
+        responseData.prompt = `Your preferred location is ${parsedResponse.suggestedLocation || 'Manhattan'}. Confirm or choose another?`;
+        responseData.suggestedLocation = parsedResponse.suggestedLocation || 'Manhattan';
+      } else if (responseData.updatedGuidedData.location) {
+        responseData.prompt = "Please confirm your appointment.";
+      }
+    }
+
+    res.json(responseData);
+  } catch (error) {
+    console.error('Error processing guided appointment:', error.message);
+    res.status(500).json({ message: 'Error processing guided appointment', error: error.message });
+  }
+});
+
+// Helper function to generate unique time slots (replace with actual availability logic)
+function generateUniqueTimeSlots(existingSlots) {
+  const baseDate = new Date().toISOString().split('T')[0];
+  const slots = [];
+  const usedTimes = new Set(existingSlots.map(slot => slot.split(' ')[1]));
+  const availableTimes = ['09:00', '11:00', '13:00', '15:00', '17:00'].filter(time => !usedTimes.has(time));
+  for (let i = 0; i < 3 && i < availableTimes.length; i++) {
+    slots.push(`${baseDate} ${availableTimes[i]}`);
+  }
+  return slots.length === 3 ? slots : [
+    `${baseDate} 09:00`,
+    `${baseDate} 11:00`,
+    `${baseDate} 13:00`,
+  ];
+}
+
 app.get('/api/auth/check-session', (req, res) => {
   console.log('Checking session status');
   if (req.session.user && req.session.user.username === STATIC_USERNAME) {
