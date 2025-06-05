@@ -1,2 +1,5 @@
 backend/.env 
 node_modules
+AgentAppointment/.env
+/AgentAppointment/__pycache__
+AgentAppointment/private-key.pem
