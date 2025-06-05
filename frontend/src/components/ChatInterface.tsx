@@ -330,38 +330,12 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-  const callGuidedFlow = async (userQuery: string, step: GuidedStep) => {
-    const response = await fetch(`${API_BASE_URL}/guidedFlow`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        query: userQuery,
-        customerType: userType === 'customer' ? 'Regular' : 'Guest',
-        guidedStep: step,
-      }),
-    });
-    return response.json();
-  };
 
   const handleReasonSelection = async (reason: string) => {
     setSelectedReason(reason);
     setMessages(prev => [...prev, { type: 'user', text: reason }]);
     setIsProcessing(true);
     try {
-      const data = await callGuidedFlow(reason, 'reasonSelection');
-      if (data.timeSlots && Array.isArray(data.timeSlots)) {
-        setLLMDateSuggestions(data.timeSlots);
-      }
-      
-      const updatedMessages: Message[] = [
-        ...messages.filter(msg => !msg.isLoading),
-        { type: 'user' as const, text: reason },
-        { type: 'assistant' as const, text: data.response || "Here are some suggested appointment slots..." }
-      ];
-      
-      setMessages(updatedMessages);
-      setGuidedStep('date');
       
       // Update quick reply suggestions based on the new context
       try {
@@ -372,7 +346,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           },
           credentials: 'include',
           body: JSON.stringify({
-            chatHistory: updatedMessages,
+            chatHistory: messages,
             userQuery: reason,
             userType: userType === 'customer' ? 'Regular' : 'Guest',
             sfData: {

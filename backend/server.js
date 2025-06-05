@@ -396,165 +396,165 @@ app.post('/api/salesforce/appointments', authenticate, async (req, res) => {
   }
 });
 
-app.post('/api/guidedFlow', async (req, res) => {
-  try {
-    const { query, customerType, guidedStep } = req.body;
-    if (!query || !customerType || !guidedStep) {
-      return res.status(400).json({ message: 'Missing query, customerType, or guidedStep' });
-    }
+// app.post('/api/guidedFlow', async (req, res) => {
+//   try {
+//     const { query, customerType, guidedStep } = req.body;
+//     if (!query || !customerType || !guidedStep) {
+//       return res.status(400).json({ message: 'Missing query, customerType, or guidedStep' });
+//     }
 
-    if (!req.session) {
-      return res.status(401).json({ message: 'Session expired or invalid', error: 'SESSION_EXPIRED' });
-    }
+//     if (!req.session) {
+//       return res.status(401).json({ message: 'Session expired or invalid', error: 'SESSION_EXPIRED' });
+//     }
 
-    // Initialize the guided flow data if not present
-    initGuidedFlowSession(req);
+//     // Initialize the guided flow data if not present
+//     initGuidedFlowSession(req);
 
-    // We'll store the partial data in session so we can finalize at the "confirmation" step
-    const flowData = req.session.guidedFlow;  // { reason, date, time, location }
+//     // We'll store the partial data in session so we can finalize at the "confirmation" step
+//     const flowData = req.session.guidedFlow;  // { reason, date, time, location }
 
-    // We'll build a specialized system prompt based on the guidedStep
-    let systemInstructions = '';
-    switch (guidedStep) {
-      case 'reasonSelection':
-        // LLM can propose times based on the reason
-        flowData.reason = query;  // store the reason in session
-        systemInstructions = `
-User selected a reason: ${flowData.reason}.
-Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-10T16:00:00.000Z").
-Return them under "timeSlots" array in JSON.
-Start the Dates from 16 march 2025 it is.
-Include a "response" that politely offers those slots, plus an "alternateDatesOption" if you wish.
-        `;
-        break;
+//     // We'll build a specialized system prompt based on the guidedStep
+//     let systemInstructions = '';
+//     switch (guidedStep) {
+//       case 'reasonSelection':
+//         // LLM can propose times based on the reason
+//         flowData.reason = query;  // store the reason in session
+//         systemInstructions = `
+// User selected a reason: ${flowData.reason}.
+// Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-10T16:00:00.000Z").
+// Return them under "timeSlots" array in JSON.
+// Start the Dates from 16 march 2025 it is.
+// Include a "response" that politely offers those slots, plus an "alternateDatesOption" if you wish.
+//         `;
+//         break;
 
-      case 'timeSelection':
-        // The user presumably picks from the LLM-suggested times
-        flowData.time = query;  // store the chosen time in session (should be in ISO 8601 format)
-        systemInstructions = `
-User selected the time slot: ${flowData.time}.
-Now we must gather the location. Provide 3 location options in "locationOptions": ["Brooklyn","Manhattan","New York"].
-Return them in a JSON array. Also provide a "response" to ask the user to choose a location.
-        `;
-        break;
+//       case 'timeSelection':
+//         // The user presumably picks from the LLM-suggested times
+//         flowData.time = query;  // store the chosen time in session (should be in ISO 8601 format)
+//         systemInstructions = `
+// User selected the time slot: ${flowData.time}.
+// Now we must gather the location. Provide 3 location options in "locationOptions": ["Brooklyn","Manhattan","New York"].
+// Return them in a JSON array. Also provide a "response" to ask the user to choose a location.
+//         `;
+//         break;
 
-      case 'locationSelection':
-        // The user picks a location
-        flowData.location = query;  // store the chosen location in session
-        systemInstructions = `
-User selected location: ${flowData.location}.
-Now we have reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a "response" summarizing these choices and ask for confirmation. 
-Include something like "Please confirm your appointment."
-        `;
-        break;
+//       case 'locationSelection':
+//         // The user picks a location
+//         flowData.location = query;  // store the chosen location in session
+//         systemInstructions = `
+// User selected location: ${flowData.location}.
+// Now we have reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
+// Return a "response" summarizing these choices and ask for confirmation. 
+// Include something like "Please confirm your appointment."
+//         `;
+//         break;
 
-      case 'confirmation':
-        // The user confirms the final details. Now we create the appointment in Salesforce.
-        systemInstructions = `
-The user confirmed the appointment with reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a short "response" that the appointment is being booked. 
-        `;
-        break;
+//       case 'confirmation':
+//         // The user confirms the final details. Now we create the appointment in Salesforce.
+//         systemInstructions = `
+// The user confirmed the appointment with reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
+// Return a short "response" that the appointment is being booked. 
+//         `;
+//         break;
 
-      default:
-        systemInstructions = 'No recognized guided step.';
-        break;
-    }
+//       default:
+//         systemInstructions = 'No recognized guided step.';
+//         break;
+//     }
 
-    // Add system prompt
-    if (!req.session.chatHistory) {
-      req.session.chatHistory = [];
-    }
-    req.session.chatHistory.push({ role: 'system', content: systemInstructions });
-    req.session.chatHistory.push({ role: 'user', content: query });
+//     // Add system prompt
+//     if (!req.session.chatHistory) {
+//       req.session.chatHistory = [];
+//     }
+//     req.session.chatHistory.push({ role: 'system', content: systemInstructions });
+//     req.session.chatHistory.push({ role: 'user', content: query });
 
-    // Call OpenAI with your messages
-    const openaiResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: req.session.chatHistory,
-      max_tokens: 500,
-      temperature: 0.7,
-    });
+//     // Call OpenAI with your messages
+//     const openaiResponse = await openai.chat.completions.create({
+//       model: 'gpt-4o-mini',
+//       messages: req.session.chatHistory,
+//       max_tokens: 500,
+//       temperature: 0.7,
+//     });
 
-    const llmOutput = openaiResponse.choices[0].message.content.trim();
-    req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
-    req.session.save(() => {});
+//     const llmOutput = openaiResponse.choices[0].message.content.trim();
+//     req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
+//     req.session.save(() => {});
 
-    // Attempt to parse the LLM JSON
-    let parsed;
-    try {
-      parsed = JSON.parse(llmOutput);
-    } catch (err) {
-      parsed = JSON.parse(extractJSON(llmOutput));
-    }
+//     // Attempt to parse the LLM JSON
+//     let parsed;
+//     try {
+//       parsed = JSON.parse(llmOutput);
+//     } catch (err) {
+//       parsed = JSON.parse(extractJSON(llmOutput));
+//     }
 
-    // Format timeSlots for display
-    let formattedTimeSlots = [];
-    if (parsed.timeSlots && Array.isArray(parsed.timeSlots)) {
-      formattedTimeSlots = parsed.timeSlots.map(slot => ({
-        display: formatDateTimeForDisplay(slot),
-        raw: slot
-      }));
-    }
+//     // Format timeSlots for display
+//     let formattedTimeSlots = [];
+//     if (parsed.timeSlots && Array.isArray(parsed.timeSlots)) {
+//       formattedTimeSlots = parsed.timeSlots.map(slot => ({
+//         display: formatDateTimeForDisplay(slot),
+//         raw: slot
+//       }));
+//     }
 
-    // If we're at confirmation, create the record in Salesforce
-    let appointmentDetails = null;
-    if (guidedStep === 'confirmation') {
-      try {
-        // Since flowData.time is already in ISO 8601 format (e.g., "2023-10-27T16:00:00.000Z")
-        const dateTime = flowData.time;
-        if (!dateTime) {
-          console.error('Missing date/time in confirmation step');
-          throw new Error('Invalid date/time format');
-        }
+//     // If we're at confirmation, create the record in Salesforce
+//     let appointmentDetails = null;
+//     if (guidedStep === 'confirmation') {
+//       try {
+//         // Since flowData.time is already in ISO 8601 format (e.g., "2023-10-27T16:00:00.000Z")
+//         const dateTime = flowData.time;
+//         if (!dateTime) {
+//           console.error('Missing date/time in confirmation step');
+//           throw new Error('Invalid date/time format');
+//         }
 
-        // Create the record in SF
-        const conn = getSalesforceConnection();
-        const newAppointment = {
-          Reason_for_Visit__c: flowData.reason,
-          Appointment_Time__c: dateTime,
-          Location__c: flowData.location,
-          Contact__c: '003dM000005H5A7QAK'
-        };
-        const result = await conn.sobject('Appointment__c').create(newAppointment);
+//         // Create the record in SF
+//         const conn = getSalesforceConnection();
+//         const newAppointment = {
+//           Reason_for_Visit__c: flowData.reason,
+//           Appointment_Time__c: dateTime,
+//           Location__c: flowData.location,
+//           Contact__c: '003dM000005H5A7QAK'
+//         };
+//         const result = await conn.sobject('Appointment__c').create(newAppointment);
 
-        if (result.success) {
-          appointmentDetails = {
-            Id: result.id,
-            Reason_for_Visit__c: flowData.reason,
-            Appointment_Time__c: dateTime,
-            Location__c: flowData.location
-          };
-        } else {
-          console.error('SF creation failed:', result);
-          throw new Error('Failed to create appointment in Salesforce');
-        }
+//         if (result.success) {
+//           appointmentDetails = {
+//             Id: result.id,
+//             Reason_for_Visit__c: flowData.reason,
+//             Appointment_Time__c: dateTime,
+//             Location__c: flowData.location
+//           };
+//         } else {
+//           console.error('SF creation failed:', result);
+//           throw new Error('Failed to create appointment in Salesforce');
+//         }
 
-        // Clear the session data
-        req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
-      } catch (error) {
-        console.error('Error creating appointment in SF:', error);
-        return res.status(500).json({ message: 'Failed to create appointment', error: error.message });
-      }
-    }
+//         // Clear the session data
+//         req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
+//       } catch (error) {
+//         console.error('Error creating appointment in SF:', error);
+//         return res.status(500).json({ message: 'Failed to create appointment', error: error.message });
+//       }
+//     }
 
-    // Return the LLM's response plus any additional data
-    const responsePayload = {
-      response: parsed.response || '...',
-      appointmentDetails: appointmentDetails || parsed.appointmentDetails || null,
-      timeSlots: formattedTimeSlots,
-      locationOptions: parsed.locationOptions || [],
-      alternateDatesOption: parsed.alternateDatesOption || null
-    };
+//     // Return the LLM's response plus any additional data
+//     const responsePayload = {
+//       response: parsed.response || '...',
+//       appointmentDetails: appointmentDetails || parsed.appointmentDetails || null,
+//       timeSlots: formattedTimeSlots,
+//       locationOptions: parsed.locationOptions || [],
+//       alternateDatesOption: parsed.alternateDatesOption || null
+//     };
 
-    return res.json(responsePayload);
+//     return res.json(responsePayload);
 
-  } catch (error) {
-    console.error('Error in /api/guidedFlow:', error);
-    return res.status(500).json({ message: 'Error in guidedFlow', error: error.message });
-  }
-});
+//   } catch (error) {
+//     console.error('Error in /api/guidedFlow:', error);
+//     return res.status(500).json({ message: 'Error in guidedFlow', error: error.message });
+//   }
+// });
 
 app.post('/api/chat', optionalAuthenticate, async (req, res) => {
   console.log('Received chat request:', JSON.stringify(req.body, null, 2));
