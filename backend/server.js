@@ -648,7 +648,25 @@ Banker ID: ${r.Banker__c || 'Not specified'}`;
     console.log('Added user query to chat history:', JSON.stringify(req.session.chatHistory, null, 2));
 
     const prompt = `
-You are a bank appointment booking assistant. Based on the user's query and context, suggest appointment details and respond naturally. Maintain conversational flow using the chat history.
+   You are a smart, human-like, and proactive bank appointment assistant.
+
+**Your goals:**
+- Greet users warmly with "Hey ${
+      req.session.user?.username || "there"
+    },in start"
+- Reply in 1–2 crisp, helpful lines using natural and empathetic tone
+- Understand the user's urgency, patterns, and preferences
+- Personalize recommendations using appointment history, behavior, and context
+- If appointment is confirmed, add a friendly reminder to bring required documents (e.g., ID proof, address proof, recent statements)
+
+**Your behavior must include:**
+- Suggest earlier slots if the scenario is urgent
+- Prioritize after-school hours for student users
+- Merge overlapping appointments across locations when practical
+- Avoid repeating appointment reasons recently handled—suggest logical next steps instead
+- Prefer user’s common booking time (morning/evening)
+- Consider environmental and behavioral factors (like traffic, weather, prior habits)
+- Maintain conversational memory across sessions to allow natural follow-ups on past conversations
 
 Current Date: ${new Date().toISOString().split('T')[0]}
 User Query: ${query}
@@ -958,16 +976,28 @@ Available Product Categories: ${Object.keys(productMapping).join(', ')}
 
     // LLM Prompt with strict JSON enforcement
     const prompt = `
-You are a banking assistant tasked with recommending products based on a customer's visit history, banker notes, and current appointment reason. Use the following context to suggest up to 3 products from the available categories.
+You are a banking assistant tasked with recommending products based on a customer's visit history, banker notes, and current appointment reason. Use the following context to Suggest the next logical appointment purpose, avoiding duplicates from past visits. suggest up to 3 products from the available categories.
 
 ${contextData}
 
 Rules:
-- Analyze the visit reasons, banker notes, and current appointment reason (if provided) to determine the customer's needs.
-- Recommend up to 3 products by selecting the most relevant product categories from: ${Object.keys(productMapping).join(', ')}.
-- Return ONLY a valid JSON object with a "recommendations" array containing the category keys (e.g., "checking_account", "savings_account") and a "reason" string explaining why these products were recommended.
+- Study past visit reasons and banker notes to understand what services the customer has already received.
+- Do NOT suggest duplicate product types or appointment purposes already handled.
+- Instead, recommend products and appointment purposes that logically follow the previous ones.
+- Recommend up to 3 products by selecting the most relevant product categories from: ${Object.keys(
+      productMapping
+    ).join(", ")}.
+- If the user has no current appointment reason, suggest the most likely next step based on their past activity.
+- Be proactive. If customer behavior shows gaps (e.g., no digital banking yet), recommend it as a next logical step.
+- Suggest a future appointment purpose in "nextAppointmentReason" field.
+
+Return ONLY a valid JSON object in this format:
+{
+  "recommendations": ["checking_account", "credit_card"],
+  "reason": "Customer recently opened a checking account, so a credit card or savings option is the next logical step.",
+  "nextAppointmentReason": "Discuss savings account or credit card options"
+}
 - Do NOT include any text outside the JSON object (e.g., no explanations, comments, or markdown).
-- Example response: {"recommendations": ["checking_account", "savings_account"], "reason": "Customer frequently visits to open accounts and manage savings."}
 `;
 
     const openaiResponse = await openai.chat.completions.create({
