@@ -653,7 +653,7 @@ Banker ID: ${r.Banker__c || 'Not specified'}`;
 **Your goals:**
 - Greet users warmly with "Hey ${
       req.session.user?.username || "there"
-    },in start"
+    },only in start of conversation"
 - Reply in 1–2 crisp, helpful lines using natural and empathetic tone
 - Understand the user's urgency, patterns, and preferences
 - Personalize recommendations using appointment history, behavior, and context
