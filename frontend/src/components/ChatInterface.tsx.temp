@@ -176,46 +176,44 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
     const data = await response.json();
     
-    // Get dynamic suggested replies from the new endpoint
+    // Extract suggested replies from the response if available
+    // This assumes the LLM might include suggested replies in its response
     try {
-      // Call the suggestedReplies endpoint with current chat context
-      const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          chatHistory: messages,
-          userQuery: query,
-          userType: userType === 'customer' ? 'Regular' : 'Guest',
-          sfData: appointmentStatus.details ? {
-            appointments: [appointmentStatus.details],
-            customerInfo: {
-              Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest',
-              Preferred_Branch__c: appointmentStatus.details.Location__c
-            }
-          } : null
-        }),
-      });
-
-      if (suggestionsResponse.ok) {
-        const suggestionsData = await suggestionsResponse.json();
-        if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
-          setSuggestedReplies(suggestionsData.suggestions);
-        }
+      // Look for suggested replies in the format [Reply 1] [Reply 2] [Reply 3]
+      const suggestedRepliesPattern = /\[(.*?)\]/g;
+      const matches = data.response.match(suggestedRepliesPattern);
+      
+      if (matches && matches.length > 0) {
+        // Remove the brackets and set as suggested replies
+        const extractedReplies = matches.map((match: string) => match.replace(/\[|\]/g, '').trim());
+        setSuggestedReplies(extractedReplies.slice(0, 4)); // Limit to 4 suggestions
       } else {
-        // Fallback to default suggestions if the endpoint fails
-        setSuggestedReplies([
-          "Book an appointment",
-          "Find nearest branch",
-          "Check my appointments",
-          "I need help"
-        ]);
+        // If no suggestions found in brackets, extract common action phrases
+        const commonActions = [
+          "book appointment", "schedule appointment", "find branch", "check appointments",
+          "yes", "no", "tell me more", "help", "cancel", "confirm"
+        ];
+        
+        const lowerResponse = data.response.toLowerCase();
+        const contextualSuggestions = commonActions.filter(action => 
+          lowerResponse.includes(action.toLowerCase())
+        );
+        
+        if (contextualSuggestions.length > 0) {
+          setSuggestedReplies(contextualSuggestions.slice(0, 4));
+        } else {
+          // Default suggestions if none found
+          setSuggestedReplies([
+            "Book an appointment",
+            "Find nearest branch",
+            "Check my appointments",
+            "I need help"
+          ]);
+        }
       }
     } catch (error) {
-      console.error('Error fetching suggested replies:', error);
-      // Set default suggestions if API call fails
+      console.error('Error extracting suggested replies:', error);
+      // Set default suggestions if extraction fails
       setSuggestedReplies([
         "Book an appointment",
         "Find nearest branch",
@@ -330,49 +328,34 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
+  const callGuidedFlow = async (userQuery: string, step: GuidedStep) => {
+    const response = await fetch(`${API_BASE_URL}/guidedFlow`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        query: userQuery,
+        customerType: userType === 'customer' ? 'Regular' : 'Guest',
+        guidedStep: step,
+      }),
+    });
+    return response.json();
+  };
 
   const handleReasonSelection = async (reason: string) => {
     setSelectedReason(reason);
     setMessages(prev => [...prev, { type: 'user', text: reason }]);
     setIsProcessing(true);
     try {
-      
-      // Update quick reply suggestions based on the new context
-      try {
-        const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            chatHistory: messages,
-            userQuery: reason,
-            userType: userType === 'customer' ? 'Regular' : 'Guest',
-            sfData: {
-              appointments: appointmentStatus.details ? [appointmentStatus.details] : [],
-              customerInfo: {
-                Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest'
-              }
-            }
-          }),
-        });
-
-        if (suggestionsResponse.ok) {
-          const suggestionsData = await suggestionsResponse.json();
-          if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
-            setSuggestedReplies(suggestionsData.suggestions);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching suggested replies during reason selection:', error);
-        // Fallback to date-related suggestions
-        setSuggestedReplies([
-          "Tomorrow afternoon",
-          "Next Monday",
-          "This Friday"
-        ]);
+      const data = await callGuidedFlow(reason, 'reasonSelection');
+      if (data.timeSlots && Array.isArray(data.timeSlots)) {
+        setLLMDateSuggestions(data.timeSlots);
       }
+      setMessages(prev => [
+        ...prev.filter(msg => !msg.isLoading),
+        { type: 'assistant', text: data.response || "Here are some suggested appointment slots..." }
+      ]);
+      setGuidedStep('date');
     } catch (error) {
       console.error('Error in guided flow (reason):', error);
       setMessages(prev => [...prev, {
@@ -429,7 +412,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           >
             {message.isLoading ? (
               <div className="flex items-center space-x-2">
-                <div className="animate-pulse">â³</div>
+                <div className="animate-pulse">⏳</div>
                 <span>{message.text}</span>
               </div>
             ) : (
