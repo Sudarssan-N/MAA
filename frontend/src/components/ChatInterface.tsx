@@ -134,7 +134,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const prompts = userType === 'customer' ? CUSTOMER_PROMPTS : GUEST_PROMPTS;
 
   const fetchAppointmentStatus = async () => {
-    // Implementation...
+    const component = await renderAppointmentStatus();
+    setAppointmentStatusComponent(component);
+
   };
 
   useImperativeHandle(ref, () => ({
@@ -250,7 +252,68 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   }, [charIndex, placeholderIndex, input, isProcessing, sessionError, isRecording]);
 
   useEffect(() => {
-    // Fetch initial state...
+   const fetchInitialState = async () => {
+      try {
+        console.log('Fetching initial chat state...');
+        const response = await fetch(`${API_BASE_URL}/chat/state`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          if (response.status === 401) {
+            const healthy = await checkSessionHealth();
+            if (healthy) {
+              console.log('Session valid, retrying initial state fetch...');
+              fetchInitialState();
+              return;
+            }
+          }
+          console.log('Failed to fetch initial state, using default messages');
+          setMessages(getDefaultMessages());
+          return;
+        }
+        const { messages: initialMessages, appointmentDetails } = await response.json();
+        console.log('Received initial state:', { initialMessages, appointmentDetails });
+
+        if (initialMessages && initialMessages.length > 0) {
+          const parsedMessages = initialMessages
+            .filter((msg: any) => msg.role !== 'system')
+            .map((msg: any) => ({
+              text: msg.role === 'user'
+                ? msg.content
+                : (() => {
+                    try {
+                      const parsed = JSON.parse(msg.content);
+                      return parsed.response || msg.content;
+                    } catch (e) {
+                      console.error('Error parsing message content:', e);
+                      return msg.content;
+                    }
+                  })(),
+              type: msg.role === 'user' ? 'user' : 'assistant',
+            }));
+          setMessages(parsedMessages.length > 0 ? parsedMessages : getDefaultMessages());
+        } else {
+          console.log('No initial messages, using default messages');
+          setMessages(getDefaultMessages());
+        }
+        if (appointmentDetails) {
+          setAppointmentStatus({ details: appointmentDetails, missingFields: [] });
+        }
+      } catch (error) {
+        console.error('Failed to fetch initial state:', error);
+        setMessages(getDefaultMessages());
+      }
+    };
+    checkSessionHealth().then(healthy => {
+      if (healthy) {
+        fetchInitialState();
+      } else {
+        console.log('Session unhealthy, setting default messages');
+        setSessionError(true);
+        setMessages(getDefaultMessages());
+      }
+    });
   }, [token]);
 
   const getDefaultMessages = (): Message[] => {
@@ -392,15 +455,115 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     // Implementation...
   };
 
-  const handleConfirmAppointment = async () => {
-    // Implementation...
+  const handleConfirmAppointment = async () =>{
+    setMessages(prev => [...prev, { type: 'user', text: 'Confirm appointment' }]);
+    setIsProcessing(true);
+    try {
+      
+      setMessages(prev => [
+        ...prev.filter(msg => !msg.isLoading),
+        { type: 'assistant', text: "Your appointment has been booked." }
+      ]);
+      
+      setGuidedStep('completed');
+      setSelectedReason('');
+      setSelectedDateTime({ display: '', raw: '' });
+      setSelectedLocation('');
+      setLLMDateSuggestions([]);
+      setLLMLocationOptions([]);
+    } catch (error) {
+      console.error('Error confirming appointment:', error);
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        text: 'Could not confirm appointment. Please try again.'
+      }]);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleMicClick = () => {
-    // Implementation...
+    if (!recognitionRef.current) {
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        text: 'Speech recognition is not supported in your browser.'
+      }]);
+      return;
+    }
+    if (!navigator.onLine) {
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        text: 'Your device appears to be offline. Speech recognition requires an internet connection.'
+      }]);
+      return;
+    }
+    if (isRecording) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.error('Error stopping recognition:', e);
+        setIsRecording(false);
+      }
+    } else {
+      setInput('');
+      try {
+        recognitionRef.current.start();
+      } catch (e) {
+        console.error('Error starting recognition:', e);
+        setIsRecording(false);
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          text: 'Could not start speech recognition. Please try again.'
+        }]);
+      }
+    }
   };
 
   const renderAppointmentStatus = async () => {
+    const { details } = appointmentStatus;
+    const chatHistory = messages.map(msg => ({ type: msg.type, text: msg.text }));
+    if (!details || !details.Id) return null;
+    console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
+
+    const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify({ text: input, chatHistory }),
+    });
+
+    const { isConfirmed } = await response.json();
+
+    if (!isConfirmed) return null;
+
+    console.log('Is confirmed', isConfirmed);
+
+    return (
+      <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
+        <div className="flex items-center gap-2 mb-2">
+          <CheckCircle className="w-5 h-5 text-green-600" />
+          <h3 className="font-medium">Appointment Confirmation</h3>
+        </div>
+        <div className="space-y-1 text-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="text-gray-500">Purpose:</div>
+            <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
+            <div className="text-gray-500">Date & Time:</div>
+            <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
+            <div className="text-gray-500">Location:</div>
+            <div>{details?.Location__c || '(Not specified)'}</div>
+          </div>
+          {details?.Id && (
+            <p className="mt-2 text-gray-600 text-xs">
+              Appointment ID: {details.Id}
+            </p>
+          )}
+        </div>
+      </div>
+    );
     // Implementation...
   };
 
