@@ -15,7 +15,7 @@ interface ChatInterfaceProps {
   isLoggedIn: boolean;
   userName: string;
   userType: 'guest' | 'customer' | null;
-  token?: string | null;
+  token?: string | null; // Kept for compatibility, but not used
   isGuidedMode: boolean;
   onReasonChange: (reason: string | undefined) => void;
   onToggleRecommendations: () => void;
@@ -96,7 +96,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   token,
   isGuidedMode,
   onReasonChange,
-  onToggleRecommendations, // Destructure new prop
+  onToggleRecommendations,
 }, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -126,7 +126,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [currentPlaceholder, setCurrentPlaceholder] = useState('');
   const [charIndex, setCharIndex] = useState(0);
-  
+
   // State for dynamic quick reply suggestions
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
 
@@ -175,10 +175,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
 
     const data = await response.json();
-    
-    // Get dynamic suggested replies from the new endpoint
+
+    // Get dynamic suggested replies
     try {
-      // Call the suggestedReplies endpoint with current chat context
       const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
         method: 'POST',
         headers: {
@@ -205,7 +204,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           setSuggestedReplies(suggestionsData.suggestions);
         }
       } else {
-        // Fallback to default suggestions if the endpoint fails
         setSuggestedReplies([
           "Book an appointment",
           "Find nearest branch",
@@ -215,7 +213,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       }
     } catch (error) {
       console.error('Error fetching suggested replies:', error);
-      // Set default suggestions if API call fails
       setSuggestedReplies([
         "Book an appointment",
         "Find nearest branch",
@@ -223,7 +220,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         "I need help"
       ]);
     }
-    
+
     return {
       response: data.response,
       appointmentDetails: data.appointmentDetails || null,
@@ -238,8 +235,44 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   }, [guidedStep]);
 
   useEffect(() => {
-    setMessages(getDefaultMessages());
-  }, []);
+    // Fetch initial chat state when logged in
+    const fetchInitialState = async () => {
+      if (isLoggedIn) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/chat/state`, {
+            credentials: 'include',
+          });
+          if (response.ok) {
+            const data = await response.json();
+            console.log('Fetched chat state:', data); // Debug log
+            if (data.messages && Array.isArray(data.messages)) {
+              const formattedMessages = data.messages.map((msg: any) => {
+                if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                  try {
+                    const parsed = JSON.parse(msg.content);
+                    return { type: 'assistant', text: parsed.response || msg.content };
+                  } catch (e) {
+                    console.warn('Failed to parse assistant message content:', e);
+                    return { type: 'assistant', text: msg.content };
+                  }
+                }
+                return { type: msg.role === 'assistant' ? 'assistant' : 'user', text: msg.content };
+              });
+              setMessages(formattedMessages);
+            }
+            setAppointmentStatus({ details: data.appointmentDetails, missingFields: [] });
+          } else if (response.status === 401) {
+            setSessionError(true);
+            setMessages([{ type: 'assistant', text: 'Session expired. Please log in again.' }]);
+          }
+        } catch (error) {
+          console.error('Error fetching initial chat state:', error);
+          setMessages([{ type: 'assistant', text: 'Error loading chat. Please try again.' }]);
+        }
+      }
+    };
+    fetchInitialState();
+  }, [isLoggedIn]);
 
   useEffect(() => {
     // SpeechRecognition setup...
@@ -250,21 +283,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   }, [charIndex, placeholderIndex, input, isProcessing, sessionError, isRecording]);
 
   useEffect(() => {
-    // Fetch initial state...
-  }, [token]);
-
-  const getDefaultMessages = (): Message[] => {
-    const greeting = userType === 'customer' && userName ? 
-      `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
-      `Welcome to MyBank appointment booking! How can I help you today?`;
-      
-    return [
-      { type: 'assistant', text: greeting },
-      { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-    ];
-  };
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -272,7 +290,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const handleSend = async (text: string = input) => {
     if (!text.trim() || isProcessing) return;
 
-    // In guided mode, if not completed, we use the text to override the button selections
     if (isGuidedMode && guidedStep !== 'completed') {
       if (guidedStep === 'reason') {
         handleReasonSelection(text);
@@ -353,17 +370,16 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       if (data.timeSlots && Array.isArray(data.timeSlots)) {
         setLLMDateSuggestions(data.timeSlots);
       }
-      
+
       const updatedMessages: Message[] = [
         ...messages.filter(msg => !msg.isLoading),
         { type: 'user' as const, text: reason },
         { type: 'assistant' as const, text: data.response || "Here are some suggested appointment slots..." }
       ];
-      
+
       setMessages(updatedMessages);
       setGuidedStep('date');
-      
-      // Update quick reply suggestions based on the new context
+
       try {
         const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
           method: 'POST',
@@ -392,7 +408,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         }
       } catch (error) {
         console.error('Error fetching suggested replies during reason selection:', error);
-        // Fallback to date-related suggestions
         setSuggestedReplies([
           "Tomorrow afternoon",
           "Next Monday",
@@ -430,12 +445,10 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     // Implementation...
   };
 
-  // Function to reload date suggestions
   const reloadDateSuggestions = async () => {
     // Implementation...
   };
 
-  // Enhanced reset function to handle both guided and unguided flows
   const resetSession = () => {
     // Implementation...
   };
@@ -455,7 +468,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           >
             {message.isLoading ? (
               <div className="flex items-center space-x-2">
-                <div className="animate-pulse">â³</div>
+                <div className="animate-pulse">â�³</div>
                 <span>{message.text}</span>
               </div>
             ) : (
@@ -595,7 +608,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
               </div>
             )}
 
-            {/* Dynamic quick reply suggestions based on LLM responses */}
             <QuickReplyButtons
               handleSend={handleSend}
               isProcessing={isProcessing}
@@ -635,15 +647,13 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           </>
         ) : (
           <>
-
-            {/* Dynamic quick reply suggestions based on LLM responses */}
             <QuickReplyButtons
               handleSend={handleSend}
               isProcessing={isProcessing}
               sessionError={sessionError}
               suggestions={suggestedReplies}
             />
-            
+
             <div className="flex space-x-2">
               <input
                 type="text"
