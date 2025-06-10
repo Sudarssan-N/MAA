@@ -15,7 +15,7 @@ interface ChatInterfaceProps {
   isLoggedIn: boolean;
   userName: string;
   userType: 'guest' | 'customer' | null;
-  token?: string | null;
+  token?: string | null; // Kept for compatibility, but not used
   isGuidedMode: boolean;
   onReasonChange: (reason: string | undefined) => void;
   onToggleRecommendations: () => void;
@@ -96,7 +96,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   token,
   isGuidedMode,
   onReasonChange,
-  onToggleRecommendations, // Destructure new prop
+  onToggleRecommendations,
 }, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -126,7 +126,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [currentPlaceholder, setCurrentPlaceholder] = useState('');
   const [charIndex, setCharIndex] = useState(0);
-  
+
   // State for dynamic quick reply suggestions
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
 
@@ -134,7 +134,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const prompts = userType === 'customer' ? CUSTOMER_PROMPTS : GUEST_PROMPTS;
 
   const fetchAppointmentStatus = async () => {
-    // Implementation...
+    const component = await renderAppointmentStatus();
+    setAppointmentStatusComponent(component);
+
   };
 
   useImperativeHandle(ref, () => ({
@@ -175,10 +177,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
 
     const data = await response.json();
-    
-    // Get dynamic suggested replies from the new endpoint
+
+    // Get dynamic suggested replies
     try {
-      // Call the suggestedReplies endpoint with current chat context
       const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
         method: 'POST',
         headers: {
@@ -205,7 +206,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           setSuggestedReplies(suggestionsData.suggestions);
         }
       } else {
-        // Fallback to default suggestions if the endpoint fails
         setSuggestedReplies([
           "Book an appointment",
           "Find nearest branch",
@@ -215,7 +215,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       }
     } catch (error) {
       console.error('Error fetching suggested replies:', error);
-      // Set default suggestions if API call fails
       setSuggestedReplies([
         "Book an appointment",
         "Find nearest branch",
@@ -223,7 +222,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         "I need help"
       ]);
     }
-    
+
     return {
       response: data.response,
       appointmentDetails: data.appointmentDetails || null,
@@ -238,8 +237,44 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   }, [guidedStep]);
 
   useEffect(() => {
-    setMessages(getDefaultMessages());
-  }, []);
+    // Fetch initial chat state when logged in
+    const fetchInitialState = async () => {
+      if (isLoggedIn) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/chat/state`, {
+            credentials: 'include',
+          });
+          if (response.ok) {
+            const data = await response.json();
+            console.log('Fetched chat state:', data); // Debug log
+            if (data.messages && Array.isArray(data.messages)) {
+              const formattedMessages = data.messages.map((msg: any) => {
+                if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                  try {
+                    const parsed = JSON.parse(msg.content);
+                    return { type: 'assistant', text: parsed.response || msg.content };
+                  } catch (e) {
+                    console.warn('Failed to parse assistant message content:', e);
+                    return { type: 'assistant', text: msg.content };
+                  }
+                }
+                return { type: msg.role === 'assistant' ? 'assistant' : 'user', text: msg.content };
+              });
+              setMessages(formattedMessages);
+            }
+            setAppointmentStatus({ details: data.appointmentDetails, missingFields: [] });
+          } else if (response.status === 401) {
+            setSessionError(true);
+            setMessages([{ type: 'assistant', text: 'Session expired. Please log in again.' }]);
+          }
+        } catch (error) {
+          console.error('Error fetching initial chat state:', error);
+          setMessages([{ type: 'assistant', text: 'Error loading chat. Please try again.' }]);
+        }
+      }
+    };
+    fetchInitialState();
+  }, [isLoggedIn]);
 
   useEffect(() => {
     // SpeechRecognition setup...
@@ -250,10 +285,145 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   }, [charIndex, placeholderIndex, input, isProcessing, sessionError, isRecording]);
 
   useEffect(() => {
-    // Fetch initial state...
+   const fetchInitialState = async () => {
+      try {
+        console.log('Fetching initial chat state...');
+        const response = await fetch(`${API_BASE_URL}/chat/state`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          if (response.status === 401) {
+            const healthy = await checkSessionHealth();
+            if (healthy) {
+              console.log('Session valid, retrying initial state fetch...');
+              fetchInitialState();
+              return;
+            }
+          }
+          console.log('Failed to fetch initial state, using default messages');
+          // setMessages(getDefaultMessages());
+          const defaultMessages = await getDefaultMessages();
+          setMessages(defaultMessages);
+          return;
+        }
+        const { messages: initialMessages, appointmentDetails } = await response.json();
+        console.log('Received initial state:', { initialMessages, appointmentDetails });
+
+        if (initialMessages && initialMessages.length > 0) {
+          const parsedMessages = initialMessages
+            .filter((msg: any) => msg.role !== 'system')
+            .map((msg: any) => ({
+              text: msg.role === 'user'
+                ? msg.content
+                : (() => {
+                    try {
+                      const parsed = JSON.parse(msg.content);
+                      return parsed.response || msg.content;
+                    } catch (e) {
+                      console.error('Error parsing message content:', e);
+                      return msg.content;
+                    }
+                  })(),
+              type: msg.role === 'user' ? 'user' : 'assistant',
+            }));
+          // setMessages(parsedMessages.length > 0 ? parsedMessages : getDefaultMessages());
+          if (parsedMessages.length > 0) {
+            setMessages(parsedMessages);
+          } else {
+            const defaultMessages = await getDefaultMessages();
+            setMessages(defaultMessages);
+          }
+        } else {
+          console.log('No initial messages, using default messages');
+          const defaultMessages = await getDefaultMessages();
+          setMessages(defaultMessages);
+        }
+        if (appointmentDetails) {
+          setAppointmentStatus({ details: appointmentDetails, missingFields: [] });
+        }
+      } catch (error) {
+        console.error('Failed to fetch initial state:', error);
+        const defaultMessages = await getDefaultMessages();
+        setMessages(defaultMessages);
+      }
+    };
+    checkSessionHealth().then(async (healthy) => {
+    if (healthy) {
+      await fetchInitialState();
+    } else {
+      console.log('Session unhealthy, setting default messages');
+      setSessionError(true);
+      const defaultMessages = await getDefaultMessages();
+      setMessages(defaultMessages);
+    }
+    });
   }, [token]);
 
-  const getDefaultMessages = (): Message[] => {
+
+  // Generate personalized greeting based on customer type and chat history
+  const generatePersonalizedGreeting = async (customerType: string, chatHistory?: any[], username?: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/generate-greeting`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          customerType,
+          chatHistory,
+          username
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.greeting;
+    } catch (error) {
+      console.error('Error generating personalized greeting:', error);
+      // Return fallback greeting
+      return `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
+    }
+  };
+
+  // Replcae with new variant
+
+  // const getDefaultMessages = (): Message[] => {
+  //   const greeting = userType === 'customer' && userName ? 
+  //     `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
+  //     `Welcome to MyBank appointment booking! How can I help you today?`;
+      
+  //   return [
+  //     { type: 'assistant', text: greeting },
+  //     { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
+  //   ];
+  // };
+  const getDefaultMessages = async (): Promise<Message[]> => {
+  try {
+    const customerType = userType === 'customer' ? 'Regular' : 'Guest';
+    const chatHistoryForGreeting = messages.map(msg => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.text
+    }));
+
+    const personalizedGreeting = await generatePersonalizedGreeting(
+      customerType,
+      chatHistoryForGreeting,
+      userName
+    );
+    
+    return [
+      { type: 'assistant', text: personalizedGreeting },
+      { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
+    ];
+  } catch (error) {
+    console.error('Error generating personalized greeting, using fallback:', error);
+    
+    // Fallback to hardcoded greeting
     const greeting = userType === 'customer' && userName ? 
       `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
       `Welcome to MyBank appointment booking! How can I help you today?`;
@@ -262,7 +432,8 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       { type: 'assistant', text: greeting },
       { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
     ];
-  };
+  }
+};
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -271,32 +442,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   // Unguided free-form send
   const handleSend = async (text: string = input) => {
     if (!text.trim() || isProcessing) return;
-
-    // In guided mode, if not completed, we use the text to override the button selections
-    if (isGuidedMode && guidedStep !== 'completed') {
-      if (guidedStep === 'reason') {
-        handleReasonSelection(text);
-        setOverrideUsed(true);
-        setInput('');
-        return;
-      } else if (guidedStep === 'date') {
-        handleTimeSelection({ display: text, raw: text });
-        setOverrideUsed(true);
-        setInput('');
-        return;
-      } else if (guidedStep === 'location') {
-        handleLocationSelection(text);
-        setOverrideUsed(true);
-        setInput('');
-        return;
-      } else if (guidedStep === 'confirmation') {
-        handleConfirmAppointment();
-        setOverrideUsed(true);
-        setInput('');
-        return;
-      }
-    }
-
+    
     setIsProcessing(true);
     setMessages(prev => [...prev, { type: 'user', text }]);
     setInput('');
@@ -330,85 +476,70 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-  const callGuidedFlow = async (userQuery: string, step: GuidedStep) => {
-    const response = await fetch(`${API_BASE_URL}/guidedFlow`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        query: userQuery,
-        customerType: userType === 'customer' ? 'Regular' : 'Guest',
-        guidedStep: step,
-      }),
-    });
-    return response.json();
-  };
 
-  const handleReasonSelection = async (reason: string) => {
-    setSelectedReason(reason);
-    setMessages(prev => [...prev, { type: 'user', text: reason }]);
-    setIsProcessing(true);
-    try {
-      const data = await callGuidedFlow(reason, 'reasonSelection');
-      if (data.timeSlots && Array.isArray(data.timeSlots)) {
-        setLLMDateSuggestions(data.timeSlots);
-      }
-      
-      const updatedMessages: Message[] = [
-        ...messages.filter(msg => !msg.isLoading),
-        { type: 'user' as const, text: reason },
-        { type: 'assistant' as const, text: data.response || "Here are some suggested appointment slots..." }
-      ];
-      
-      setMessages(updatedMessages);
-      setGuidedStep('date');
-      
-      // Update quick reply suggestions based on the new context
-      try {
-        const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            chatHistory: updatedMessages,
-            userQuery: reason,
-            userType: userType === 'customer' ? 'Regular' : 'Guest',
-            sfData: {
-              appointments: appointmentStatus.details ? [appointmentStatus.details] : [],
-              customerInfo: {
-                Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest'
-              }
-            }
-          }),
-        });
+  // const handleReasonSelection = async (reason: string) => {
+  //   setSelectedReason(reason);
+  //   setMessages(prev => [...prev, { type: 'user', text: reason }]);
+  //   setIsProcessing(true);
+  //   try {
+  //     const data = await callGuidedFlow(reason, 'reasonSelection');
+  //     if (data.timeSlots && Array.isArray(data.timeSlots)) {
+  //       setLLMDateSuggestions(data.timeSlots);
+  //     }
 
-        if (suggestionsResponse.ok) {
-          const suggestionsData = await suggestionsResponse.json();
-          if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
-            setSuggestedReplies(suggestionsData.suggestions);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching suggested replies during reason selection:', error);
-        // Fallback to date-related suggestions
-        setSuggestedReplies([
-          "Tomorrow afternoon",
-          "Next Monday",
-          "This Friday"
-        ]);
-      }
-    } catch (error) {
-      console.error('Error in guided flow (reason):', error);
-      setMessages(prev => [...prev, {
-        type: 'assistant',
-        text: 'Error retrieving date suggestions. Please try again.'
-      }]);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  //     const updatedMessages: Message[] = [
+  //       ...messages.filter(msg => !msg.isLoading),
+  //       { type: 'user' as const, text: reason },
+  //       { type: 'assistant' as const, text: data.response || "Here are some suggested appointment slots..." }
+  //     ];
+
+  //     setMessages(updatedMessages);
+  //     setGuidedStep('date');
+
+  //     try {
+  //       const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
+  //         method: 'POST',
+  //         headers: {
+  //           'Content-Type': 'application/json',
+  //         },
+  //         credentials: 'include',
+  //         body: JSON.stringify({
+  //           chatHistory: messages,
+  //           userQuery: reason,
+  //           userType: userType === 'customer' ? 'Regular' : 'Guest',
+  //           sfData: {
+  //             appointments: appointmentStatus.details ? [appointmentStatus.details] : [],
+  //             customerInfo: {
+  //               Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest'
+  //             }
+  //           }
+  //         }),
+  //       });
+
+  //       if (suggestionsResponse.ok) {
+  //         const suggestionsData = await suggestionsResponse.json();
+  //         if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
+  //           setSuggestedReplies(suggestionsData.suggestions);
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.error('Error fetching suggested replies during reason selection:', error);
+  //       setSuggestedReplies([
+  //         "Tomorrow afternoon",
+  //         "Next Monday",
+  //         "This Friday"
+  //       ]);
+  //     }
+  //   } catch (error) {
+  //     console.error('Error in guided flow (reason):', error);
+  //     setMessages(prev => [...prev, {
+  //       type: 'assistant',
+  //       text: 'Error retrieving date suggestions. Please try again.'
+  //     }]);
+  //   } finally {
+  //     setIsProcessing(false);
+  //   }
+  // };
 
   const handleTimeSelection = async (slot: { display: string; raw: string }) => {
     // Implementation...
@@ -418,24 +549,122 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     // Implementation...
   };
 
-  const handleConfirmAppointment = async () => {
-    // Implementation...
+  const handleConfirmAppointment = async () =>{
+    setMessages(prev => [...prev, { type: 'user', text: 'Confirm appointment' }]);
+    setIsProcessing(true);
+    try {
+      
+      setMessages(prev => [
+        ...prev.filter(msg => !msg.isLoading),
+        { type: 'assistant', text: "Your appointment has been booked." }
+      ]);
+      
+      setGuidedStep('completed');
+      setSelectedReason('');
+      setSelectedDateTime({ display: '', raw: '' });
+      setSelectedLocation('');
+      setLLMDateSuggestions([]);
+      setLLMLocationOptions([]);
+    } catch (error) {
+      console.error('Error confirming appointment:', error);
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        text: 'Could not confirm appointment. Please try again.'
+      }]);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleMicClick = () => {
-    // Implementation...
+    if (!recognitionRef.current) {
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        text: 'Speech recognition is not supported in your browser.'
+      }]);
+      return;
+    }
+    if (!navigator.onLine) {
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        text: 'Your device appears to be offline. Speech recognition requires an internet connection.'
+      }]);
+      return;
+    }
+    if (isRecording) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.error('Error stopping recognition:', e);
+        setIsRecording(false);
+      }
+    } else {
+      setInput('');
+      try {
+        recognitionRef.current.start();
+      } catch (e) {
+        console.error('Error starting recognition:', e);
+        setIsRecording(false);
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          text: 'Could not start speech recognition. Please try again.'
+        }]);
+      }
+    }
   };
 
   const renderAppointmentStatus = async () => {
+    const { details } = appointmentStatus;
+    const chatHistory = messages.map(msg => ({ type: msg.type, text: msg.text }));
+    if (!details || !details.Id) return null;
+    console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
+
+    const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify({ text: input, chatHistory }),
+    });
+
+    const { isConfirmed } = await response.json();
+
+    if (!isConfirmed) return null;
+
+    console.log('Is confirmed', isConfirmed);
+
+    return (
+      <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
+        <div className="flex items-center gap-2 mb-2">
+          <CheckCircle className="w-5 h-5 text-green-600" />
+          <h3 className="font-medium">Appointment Confirmation</h3>
+        </div>
+        <div className="space-y-1 text-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="text-gray-500">Purpose:</div>
+            <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
+            <div className="text-gray-500">Date & Time:</div>
+            <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
+            <div className="text-gray-500">Location:</div>
+            <div>{details?.Location__c || '(Not specified)'}</div>
+          </div>
+          {details?.Id && (
+            <p className="mt-2 text-gray-600 text-xs">
+              Appointment ID: {details.Id}
+            </p>
+          )}
+        </div>
+      </div>
+    );
     // Implementation...
   };
 
-  // Function to reload date suggestions
   const reloadDateSuggestions = async () => {
     // Implementation...
   };
 
-  // Enhanced reset function to handle both guided and unguided flows
   const resetSession = () => {
     // Implementation...
   };
@@ -455,7 +684,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           >
             {message.isLoading ? (
               <div className="flex items-center space-x-2">
-                <div className="animate-pulse">â³</div>
+                <div className="animate-pulse">...</div>
                 <span>{message.text}</span>
               </div>
             ) : (
@@ -470,132 +699,8 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
       <div className="border-t p-4">
         {isGuidedMode ? (
-          <>
-            {guidedStep === 'reason' && (
-              <div className="mb-4">
-                <p className="mb-2 font-medium">What's the reason for your visit?</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {GUIDED_REASONS.map((reason, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleReasonSelection(reason)}
-                      disabled={isProcessing}
-                      className="text-left p-2 bg-white border rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      {reason}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+          <>      
 
-            {guidedStep === 'date' && (
-              <div className="mb-4">
-                <div className="flex justify-between items-center mb-2">
-                  <p className="font-medium">Select a date and time:</p>
-                  <button
-                    onClick={reloadDateSuggestions}
-                    disabled={isProcessing}
-                    className="text-sm text-[#CD1309] hover:underline"
-                  >
-                    Refresh options
-                  </button>
-                </div>
-                {llmDateSuggestions.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {llmDateSuggestions.map((slot, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handleTimeSelection(slot)}
-                        disabled={isProcessing}
-                        className="text-left p-2 bg-white border rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        {slot.display}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-500">Loading date options...</p>
-                )}
-              </div>
-            )}
-
-            {guidedStep === 'location' && (
-              <div className="mb-4">
-                <p className="mb-2 font-medium">Select a location:</p>
-                {llmLocationOptions.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {llmLocationOptions.map((loc, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handleLocationSelection(loc)}
-                        disabled={isProcessing}
-                        className="text-left p-2 bg-white border rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        {loc}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-500">Loading location options...</p>
-                )}
-              </div>
-            )}
-
-            {guidedStep === 'confirmation' && (
-              <div className="mb-4">
-                <p className="mb-2 font-medium">Review your details before confirming:</p>
-                <div className="p-4 border rounded-lg bg-gray-100 text-sm space-y-1">
-                  <p><strong>Reason:</strong> {selectedReason}</p>
-                  <p><strong>Date/Time:</strong> {selectedDateTime.display}</p>
-                  <p><strong>Location:</strong> {selectedLocation}</p>
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <button
-                    onClick={handleConfirmAppointment}
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg"
-                  >
-                    Confirm Appointment
-                  </button>
-                  <button
-                    onClick={() => {
-                      setGuidedStep('reason');
-                      setSelectedReason('');
-                      setSelectedDateTime({ display: '', raw: '' });
-                      setSelectedLocation('');
-                      setLLMDateSuggestions([]);
-                      setLLMLocationOptions([]);
-                    }}
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg"
-                  >
-                    Start Over
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {guidedStep === 'completed' && (
-              <div className="mb-4">
-                <p className="text-green-600 font-medium mb-2">Your appointment has been booked!</p>
-                <button
-                  onClick={() => {
-                    setGuidedStep('reason');
-                    setSelectedReason('');
-                    setSelectedDateTime({ display: '', raw: '' });
-                    setSelectedLocation('');
-                    setLLMDateSuggestions([]);
-                    setLLMLocationOptions([]);
-                  }}
-                  className="px-4 py-2 bg-[#CD1309] text-white rounded-lg"
-                >
-                  Book Another Appointment
-                </button>
-              </div>
-            )}
-
-            {/* Dynamic quick reply suggestions based on LLM responses */}
             <QuickReplyButtons
               handleSend={handleSend}
               isProcessing={isProcessing}
@@ -635,15 +740,13 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           </>
         ) : (
           <>
-
-            {/* Dynamic quick reply suggestions based on LLM responses */}
             <QuickReplyButtons
               handleSend={handleSend}
               isProcessing={isProcessing}
               sessionError={sessionError}
               suggestions={suggestedReplies}
             />
-            
+
             <div className="flex space-x-2">
               <input
                 type="text"

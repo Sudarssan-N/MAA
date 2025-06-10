@@ -1,9 +1,11 @@
-const express = require('express');
-const jsforce = require('jsforce');
-const { OpenAI } = require('openai');
-require('dotenv').config();
-const cors = require('cors');
-const session = require('express-session');
+import express from 'express';
+import jsforce from 'jsforce';
+import { OpenAI } from 'openai';
+import dotenv from 'dotenv';
+import cors from 'cors';
+import session from 'express-session';
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -12,16 +14,7 @@ app.use(express.json());
 const corsOptions = {
   origin: function (origin, callback) {
     console.log('Origin making request:', origin);
-    // Allow all origins for development
     callback(null, true);
-    
-    // For production, you should uncomment and modify this:
-    // const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:55032', 'http://localhost:55032'];
-    // if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-    //   callback(null, true);
-    // } else {
-    //   callback(new Error('Not allowed by CORS'));
-    // }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -30,8 +23,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// Handle preflight requests
 app.options('*', cors(corsOptions));
 
 app.use(session({
@@ -54,7 +45,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// In the backend (index.js)
+// Product mapping remains unchanged
 const productMapping = {
   "checking_account": [
     { name: "Everyday Checking", description: "A versatile checking account for daily transactions.", key: "checking_account" },
@@ -80,7 +71,6 @@ const productMapping = {
   ],
 };
 
-// Default recommendations if no match is found
 const defaultRecommendations = [
   { name: "Everyday Checking", description: "A versatile checking account for daily transactions.", key: "checking_account" },
   { name: "Way2Save® Savings", description: "Build your savings with automatic transfers.", key: "savings_account" },
@@ -101,11 +91,9 @@ const getSalesforceConnection = () => {
   return conn;
 };
 
-// Helper function to format ISO 8601 date/time into a readable format
 function formatDateTimeForDisplay(isoDateTime) {
   console.log('Formatting date/time for display:', isoDateTime);
   if (!isoDateTime) return 'Not specified';
-
   const date = new Date(isoDateTime);
   const options = {
     timeZone: 'UTC',
@@ -126,7 +114,6 @@ function extractJSON(str) {
   console.log('Extracting JSON from string:', str);
   const codeBlockRegex = /```(?:json)?\s*({[\s\S]*?})\s*```/;
   const codeBlockMatch = str.match(codeBlockRegex);
-  
   if (codeBlockMatch && codeBlockMatch[1]) {
     try {
       const parsed = JSON.parse(codeBlockMatch[1]);
@@ -136,10 +123,8 @@ function extractJSON(str) {
       console.error('Error parsing JSON from code block:', e.message);
     }
   }
-  
   const jsonRegex = /{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*}/g;
   const matches = str.match(jsonRegex);
-  
   if (matches) {
     for (const match of matches) {
       try {
@@ -151,7 +136,6 @@ function extractJSON(str) {
       }
     }
   }
-  
   console.log('No valid JSON found, returning empty object');
   return '{}';
 }
@@ -188,38 +172,31 @@ function convertTo24HourTime(timeStr) {
     console.log('No time string provided, returning null');
     return null;
   }
-
   const isoRegex = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})\.\d{3}Z$/;
   const isoMatch = timeStr.match(isoRegex);
   if (isoMatch) {
     console.log('Time is already in ISO 8601 format, returning:', isoMatch[1]);
     return isoMatch[1];
   }
-
   const trimmedTimeStr = timeStr.trim();
   const timeRegex = /^(\d{1,2}):?(\d{2})?\s*(AM|PM)?$/i;
   const match = trimmedTimeStr.match(timeRegex);
-
   if (!match) {
     console.log('Invalid time format, expected HH:MM AM/PM or HH:MM:', trimmedTimeStr);
     return null;
   }
-
   let [_, hours, minutes, modifier] = match;
   hours = parseInt(hours, 10);
   minutes = minutes ? parseInt(minutes, 10) : 0;
-
   if (hours > 23 || hours < 0 || minutes > 59 || minutes < 0) {
     console.log('Time out of range:', { hours, minutes });
     return null;
   }
-
   if (modifier) {
     modifier = modifier.toUpperCase();
     if (modifier === 'PM' && hours !== 12) hours += 12;
     if (modifier === 'AM' && hours === 12) hours = 0;
   }
-
   const result = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
   console.log('Converted to 24-hour format:', result);
   return result;
@@ -231,25 +208,21 @@ function combineDateTime(dateStr, timeStr) {
     console.log('Missing date or time, returning null');
     return null;
   }
-
   const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   if (isoRegex.test(timeStr)) {
     console.log('Time is already in ISO 8601 format, returning:', timeStr);
     return timeStr;
   }
-
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(dateStr)) {
     console.log('Invalid date format, expected YYYY-MM-DD:', dateStr);
     return null;
   }
-
   const time24 = convertTo24HourTime(timeStr);
   if (!time24) {
     console.log('Invalid time format, returning null');
     return null;
   }
-
   const result = `${dateStr}T${time24}.000Z`;
   console.log('Combined DateTime:', result);
   return result;
@@ -258,28 +231,21 @@ function combineDateTime(dateStr, timeStr) {
 function parseDateTimeString(dateTimeStr) {
   console.log('Parsing date/time string:', dateTimeStr);
   if (!dateTimeStr) return { date: null, time: null };
-
-  // Example format: "October 27, 2023, 09:30 AM"
   const parts = dateTimeStr.match(/(\w+ \d{1,2}, \d{4}), (\d{1,2}:\d{2} [AP]M)/i);
   if (!parts) {
     console.log('Invalid date/time format:', dateTimeStr);
     return { date: null, time: null };
   }
-
   const [, datePart, timePart] = parts;
-
-  // Parse the date part (e.g., "October 27, 2023") into YYYY-MM-DD
   const dateObj = new Date(datePart);
   if (isNaN(dateObj.getTime())) {
     console.log('Invalid date part:', datePart);
     return { date: null, time: null };
   }
-
   const year = dateObj.getFullYear();
   const month = String(dateObj.getMonth() + 1).padStart(2, '0');
   const day = String(dateObj.getDate()).padStart(2, '0');
   const dateStr = `${year}-${month}-${day}`;
-
   return { date: dateStr, time: timePart };
 }
 
@@ -305,7 +271,57 @@ const optionalAuthenticate = (req, res, next) => {
   next();
 };
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/generate-greeting', optionalAuthenticate, async (req, res) => {
+  // Determine customer type based on login status
+  const customerType = req.user && req.user.username !== 'guest' ? 'Valued Customer' : 'Guest';
+  const username = req.user ? req.user.username : 'Guest';
+  console.log('Generating personalized greeting for:', { customerType, username });
+  try {
+    let contextData = '';
+    if (chatHistory && chatHistory.chatHistory && chatHistory.chatHistory.length > 0) {
+      const pastReasons = chatHistory.chatHistory
+        .filter(msg => msg.role === 'user')
+        .map(msg => msg.content)
+        .filter(content => content.includes('reason') || content.includes('appointment'))
+        .join('; ');
+      const guidedFlow = chatHistory.guidedFlow || {};
+      contextData = `
+Previous Interactions: ${pastReasons || 'No specific reasons provided.'}
+Guided Flow Data: Reason: ${guidedFlow.reason || 'None'}, Location: ${guidedFlow.location || 'None'}
+`;
+    }
+
+    const prompt = `
+You are a friendly bank appointment assistant. Generate a personalized greeting for a user based on their customer type and previous interactions. The greeting should:
+- Welcome the user by name (if available, use "${username}" or "Guest" for guests).
+- Reference their customer type (e.g., "valued customer" for Regular, "guest" for Guest).
+- If previous interactions exist, subtly mention past appointment reasons or locations (e.g., "I see you've visited Brooklyn before").
+- End with a question like "How can I help you today?" or similar.
+- Keep the tone warm and professional.
+- Return the greeting as a plain string, no JSON or extra formatting.
+
+Customer Type: ${customerType}
+Username: ${username || 'Guest'}
+${contextData ? `Context Information:\n${contextData}` : 'No prior context available.'}
+`;
+
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'system', content: prompt }],
+      max_tokens: 100,
+      temperature: 0.7,
+    });
+
+    const greeting = openaiResponse.choices[0].message.content.trim();
+    console.log('Generated greeting:', greeting);
+    return greeting;
+  } catch (error) {
+    console.error('Error generating personalized greeting:', error);
+    return `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
   console.log('Login request received:', req.body);
   const { username, password } = req.body;
 
@@ -319,7 +335,62 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   req.session.user = { username };
+  req.session.referralState = 'in_progress';
+  req.session.sfChatId = null;
   console.log('User logged in, session updated:', req.session.user);
+
+  const contactId = '003dM000005H5A7QAK';
+  try {
+    // Mark existing in-progress sessions as completed
+    const conn = getSalesforceConnection();
+    const query = `SELECT Id FROM Chat_Session__c WHERE Contact__c = '${contactId}' AND Appointment_Status__c = 'in_progress'`;
+    const result = await conn.query(query);
+    if (result.records.length > 0) {
+      const updates = result.records.map(record => ({
+        Id: record.Id,
+        Appointment_Status__c: 'completed',
+        Last_Updated__c: new Date().toISOString()
+      }));
+      await conn.sobject('Chat_Session__c').update(updates);
+      console.log('Marked in-progress sessions as completed:', result.records.length);
+    }
+
+    // Load or initialize chat session
+    const sfChat = await loadChatHistoryFromSalesforce(contactId);
+    let greeting;
+    if (sfChat && sfChat.chatHistory) {
+      req.session.chatHistory = sfChat.chatHistory.chatHistory || [];
+      req.session.guidedFlow = sfChat.chatHistory.guidedFlow || { reason: null, date: null, time: null, location: null };
+      req.session.referralState = sfChat.referralState;
+      req.session.sfChatId = sfChat.id;
+      console.log('Loaded existing chat session from Salesforce');
+      greeting = await generatePersonalizedGreeting('Regular', sfChat.chatHistory, username);
+    } else {
+      req.session.chatHistory = [];
+      req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
+      req.session.referralState = 'in_progress';
+      greeting = await generatePersonalizedGreeting('Regular', null, username);
+    }
+
+    // Initialize chat history with greeting
+    req.session.chatHistory = [
+      { role: 'assistant', content: JSON.stringify({ response: greeting, appointmentDetails: null }) }
+    ];
+
+    // Save new chat session
+    req.session.sfChatId = await saveChatHistoryToSalesforce({
+      contactId,
+      chatHistory: {
+        guidedFlow: req.session.guidedFlow,
+        chatHistory: req.session.chatHistory
+      },
+      referralState: 'in_progress'
+    });
+    console.log('Created new chat session:', req.session.sfChatId);
+  } catch (error) {
+    console.error('Error managing chat session on login:', error);
+  }
+
   res.json({ message: 'Login successful', username });
 });
 
@@ -385,6 +456,21 @@ app.post('/api/salesforce/appointments', authenticate, async (req, res) => {
     const result = await conn.sobject('Appointment__c').create(appointmentData);
     if (result.success) {
       console.log('Appointment created successfully with ID:', result.id);
+      
+      if (req.session.sfChatId) {
+        await conn.sobject('Chat_Session__c').update({
+          Id: req.session.sfChatId,
+          Appointment_Status__c: 'completed',
+          Last_Updated__c: new Date().toISOString()
+        });
+        console.log('Chat session marked as completed:', req.session.sfChatId);
+        req.session.referralState = 'completed';
+      }
+
+      req.session.chatHistory = [];
+      req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
+      req.session.sfChatId = null;
+
       res.json({ message: 'Appointment created', id: result.id });
     } else {
       console.error('Failed to create appointment:', result);
@@ -393,166 +479,6 @@ app.post('/api/salesforce/appointments', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error creating appointment:', error.message);
     res.status(500).json({ message: 'Failed to create appointment', error: error.message });
-  }
-});
-
-app.post('/api/guidedFlow', async (req, res) => {
-  try {
-    const { query, customerType, guidedStep } = req.body;
-    if (!query || !customerType || !guidedStep) {
-      return res.status(400).json({ message: 'Missing query, customerType, or guidedStep' });
-    }
-
-    if (!req.session) {
-      return res.status(401).json({ message: 'Session expired or invalid', error: 'SESSION_EXPIRED' });
-    }
-
-    // Initialize the guided flow data if not present
-    initGuidedFlowSession(req);
-
-    // We'll store the partial data in session so we can finalize at the "confirmation" step
-    const flowData = req.session.guidedFlow;  // { reason, date, time, location }
-
-    // We'll build a specialized system prompt based on the guidedStep
-    let systemInstructions = '';
-    switch (guidedStep) {
-      case 'reasonSelection':
-        // LLM can propose times based on the reason
-        flowData.reason = query;  // store the reason in session
-        systemInstructions = `
-User selected a reason: ${flowData.reason}.
-Please suggest 3 possible appointment date/time slots in ISO 8601 format (e.g., "2025-03-10T16:00:00.000Z").
-Return them under "timeSlots" array in JSON.
-Start the Dates from 16 march 2025 it is.
-Include a "response" that politely offers those slots, plus an "alternateDatesOption" if you wish.
-        `;
-        break;
-
-      case 'timeSelection':
-        // The user presumably picks from the LLM-suggested times
-        flowData.time = query;  // store the chosen time in session (should be in ISO 8601 format)
-        systemInstructions = `
-User selected the time slot: ${flowData.time}.
-Now we must gather the location. Provide 3 location options in "locationOptions": ["Brooklyn","Manhattan","New York"].
-Return them in a JSON array. Also provide a "response" to ask the user to choose a location.
-        `;
-        break;
-
-      case 'locationSelection':
-        // The user picks a location
-        flowData.location = query;  // store the chosen location in session
-        systemInstructions = `
-User selected location: ${flowData.location}.
-Now we have reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a "response" summarizing these choices and ask for confirmation. 
-Include something like "Please confirm your appointment."
-        `;
-        break;
-
-      case 'confirmation':
-        // The user confirms the final details. Now we create the appointment in Salesforce.
-        systemInstructions = `
-The user confirmed the appointment with reason = ${flowData.reason}, time = ${flowData.time}, location = ${flowData.location}.
-Return a short "response" that the appointment is being booked. 
-        `;
-        break;
-
-      default:
-        systemInstructions = 'No recognized guided step.';
-        break;
-    }
-
-    // Add system prompt
-    if (!req.session.chatHistory) {
-      req.session.chatHistory = [];
-    }
-    req.session.chatHistory.push({ role: 'system', content: systemInstructions });
-    req.session.chatHistory.push({ role: 'user', content: query });
-
-    // Call OpenAI with your messages
-    const openaiResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: req.session.chatHistory,
-      max_tokens: 500,
-      temperature: 0.7,
-    });
-
-    const llmOutput = openaiResponse.choices[0].message.content.trim();
-    req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
-    req.session.save(() => {});
-
-    // Attempt to parse the LLM JSON
-    let parsed;
-    try {
-      parsed = JSON.parse(llmOutput);
-    } catch (err) {
-      parsed = JSON.parse(extractJSON(llmOutput));
-    }
-
-    // Format timeSlots for display
-    let formattedTimeSlots = [];
-    if (parsed.timeSlots && Array.isArray(parsed.timeSlots)) {
-      formattedTimeSlots = parsed.timeSlots.map(slot => ({
-        display: formatDateTimeForDisplay(slot),
-        raw: slot
-      }));
-    }
-
-    // If we're at confirmation, create the record in Salesforce
-    let appointmentDetails = null;
-    if (guidedStep === 'confirmation') {
-      try {
-        // Since flowData.time is already in ISO 8601 format (e.g., "2023-10-27T16:00:00.000Z")
-        const dateTime = flowData.time;
-        if (!dateTime) {
-          console.error('Missing date/time in confirmation step');
-          throw new Error('Invalid date/time format');
-        }
-
-        // Create the record in SF
-        const conn = getSalesforceConnection();
-        const newAppointment = {
-          Reason_for_Visit__c: flowData.reason,
-          Appointment_Time__c: dateTime,
-          Location__c: flowData.location,
-          Contact__c: '003dM000005H5A7QAK'
-        };
-        const result = await conn.sobject('Appointment__c').create(newAppointment);
-
-        if (result.success) {
-          appointmentDetails = {
-            Id: result.id,
-            Reason_for_Visit__c: flowData.reason,
-            Appointment_Time__c: dateTime,
-            Location__c: flowData.location
-          };
-        } else {
-          console.error('SF creation failed:', result);
-          throw new Error('Failed to create appointment in Salesforce');
-        }
-
-        // Clear the session data
-        req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
-      } catch (error) {
-        console.error('Error creating appointment in SF:', error);
-        return res.status(500).json({ message: 'Failed to create appointment', error: error.message });
-      }
-    }
-
-    // Return the LLM's response plus any additional data
-    const responsePayload = {
-      response: parsed.response || '...',
-      appointmentDetails: appointmentDetails || parsed.appointmentDetails || null,
-      timeSlots: formattedTimeSlots,
-      locationOptions: parsed.locationOptions || [],
-      alternateDatesOption: parsed.alternateDatesOption || null
-    };
-
-    return res.json(responsePayload);
-
-  } catch (error) {
-    console.error('Error in /api/guidedFlow:', error);
-    return res.status(500).json({ message: 'Error in guidedFlow', error: error.message });
   }
 });
 
@@ -570,17 +496,40 @@ app.post('/api/chat', optionalAuthenticate, async (req, res) => {
       return res.status(401).json({ message: 'Session expired or invalid', error: 'SESSION_EXPIRED', recovery: true });
     }
 
+    const contactId = '003dM000005H5A7QAK';
+    const username = req.session.user ? req.session.user.username : 'Guest';
+    const isRegularCustomer = customerType === 'Regular' || customerType === 'customer';
+
     if (!req.session.chatHistory) {
+      const sfChat = await loadChatHistoryFromSalesforce(contactId);
+      let greeting;
+      if (sfChat && sfChat.chatHistory && sfChat.chatHistory.length > 0) {
+        req.session.chatHistory = sfChat.chatHistory;
+        req.session.referralState = sfChat.referralState;
+        req.session.sfChatId = sfChat.id;
+        console.log('Loaded unfinished chat history from Salesforce');
+        greeting = await generatePersonalizedGreeting(customerType, sfChat.chatHistory, username);
+      } else {
+        req.session.chatHistory = [];
+        req.session.referralState = 'in_progress';
+        greeting = await generatePersonalizedGreeting(customerType, null, username);
+      }
+
       req.session.chatHistory = [
-        { 
-          role: 'system', 
-          content: 'You are a friendly, proactive bank appointment assistant. Use natural language to guide the user, suggest appointment details based on context, and ask for clarification only when needed. Return responses in JSON with "response" (natural language) and "appointmentDetails" (structured data).' 
-        }
+        { role: 'assistant', content: JSON.stringify({ response: greeting, appointmentDetails: null }) }
       ];
-      console.log('Initialized chat history:', JSON.stringify(req.session.chatHistory, null, 2));
+
+      req.session.sfChatId = await saveChatHistoryToSalesforce({
+        contactId,
+        chatHistory: {
+          guidedFlow: req.session.guidedFlow || { reason: null, date: null, time: null, location: null },
+          chatHistory: req.session.chatHistory
+        },
+        referralState: 'in_progress'
+      });
+      console.log('Created new chat session:', req.session.sfChatId);
     }
 
-    // Predefined response for "Find me a branch within 5 miles with 24hrs Drive-thru ATM service" as a future capability
     const branchQuery = "Find me a branch within 5 miles with 24hrs Drive-thru ATM service";
     if (query.toLowerCase().includes(branchQuery.toLowerCase())) {
       console.log('Detected predefined branch query');
@@ -591,7 +540,21 @@ app.post('/api/chat', optionalAuthenticate, async (req, res) => {
       };
       req.session.chatHistory.push({ role: 'user', content: query });
       req.session.chatHistory.push({ role: 'assistant', content: JSON.stringify(predefinedResponse) });
-      console.log('Updated chat history with predefined response:', JSON.stringify(req.session.chatHistory, null, 2));
+
+      try {
+        req.session.sfChatId = await saveChatHistoryToSalesforce({
+          contactId,
+          chatHistory: {
+            guidedFlow: req.session.guidedFlow || { reason: null, date: null, time: null, location: null },
+            chatHistory: req.session.chatHistory
+          },
+          referralState: 'in_progress'
+        });
+        console.log('Chat history saved to Salesforce:', req.session.sfChatId);
+      } catch (error) {
+        console.error('Error saving chat history to Salesforce:', error);
+      }
+
       req.session.save((err) => {
         if (err) console.error('Error saving session:', err);
         else console.log('Session saved successfully');
@@ -609,9 +572,6 @@ app.post('/api/chat', optionalAuthenticate, async (req, res) => {
 
     let contextData = '';
     let previousAppointments = [];
-    const isRegularCustomer = customerType === 'Regular' || customerType === 'customer';
-    console.log('Customer type:', customerType, 'Is regular:', isRegularCustomer);
-
     if (isRegularCustomer) {
       const query = 'SELECT Id, Reason_for_Visit__c, Appointment_Date__c, Appointment_Time__c, Location__c, Banker__c, CreatedDate ' +
                     'FROM Appointment__c WHERE Contact__c = \'003dM000005H5A7QAK\' ORDER BY CreatedDate DESC';
@@ -645,7 +605,6 @@ Banker ID: ${r.Banker__c || 'Not specified'}`;
     }
 
     req.session.chatHistory.push({ role: 'user', content: query });
-    console.log('Added user query to chat history:', JSON.stringify(req.session.chatHistory, null, 2));
 
     const prompt = `
 You are a bank appointment booking assistant. Based on the user's query and context, suggest appointment details and respond naturally. Maintain conversational flow using the chat history.
@@ -671,13 +630,10 @@ Rules:
 - Respond in natural language under "response" and provide structured data under "appointmentDetails".
 - Return JSON like: {"response": "Here's a suggestion...", "appointmentDetails": {...}}
 - If the user has already entered all the required details, do not ask for them again.
-
 `;
-    // console.log('Generated prompt for OpenAI:', prompt);
 
     const systemPrompt = { role: 'system', content: prompt };
     const tempMessages = [...req.session.chatHistory, systemPrompt];
-    // console.log('Messages sent to OpenAI:', JSON.stringify(tempMessages, null, 2));
 
     const openaiResponse = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -689,8 +645,21 @@ Rules:
     console.log('Received response from OpenAI:', llmOutput);
 
     req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
-    console.log('Updated chat history with assistant response:', JSON.stringify(req.session.chatHistory, null, 2));
-    
+
+    try {
+      req.session.sfChatId = await saveChatHistoryToSalesforce({
+        contactId,
+        chatHistory: {
+          guidedFlow: req.session.guidedFlow || { reason: null, date: null, time: null, location: null },
+          chatHistory: req.session.chatHistory
+        },
+        referralState: 'in_progress'
+      });
+      console.log('Chat history saved to Salesforce:', req.session.sfChatId);
+    } catch (error) {
+      console.error('Error saving chat history to Salesforce:', error);
+    }
+
     req.session.save((err) => {
       if (err) {
         console.error('Error saving session:', err);
@@ -715,18 +684,14 @@ Rules:
     const requiredFields = ['Reason_for_Visit__c', 'Appointment_Date__c', 'Appointment_Time__c', 'Location__c'];
     const missingFields = requiredFields.filter(field => !appointmentDetails[field]);
     console.log('Initial missing fields:', missingFields);
-    
-    // If we have missing fields, use the LLM to extract them from the conversation
+
     if (missingFields.length > 0 && response) {
       console.log('Attempting to extract missing fields using LLM');
-      
-      // Build a conversation history for context
       const conversationHistory = req.session.chatHistory
         .filter(msg => msg.role !== 'system')
         .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.role === 'assistant' ? JSON.parse(msg.content).response || msg.content : msg.content}`)
         .join('\n');
-      
-      // Create a prompt specifically for parameter extraction
+
       const extractionPrompt = `
       You are a parameter extraction assistant. Based on the conversation history below, extract the following appointment details:
       ${missingFields.join(', ')}
@@ -759,10 +724,8 @@ Rules:
         const extractedParams = JSON.parse(extractionResponse.choices[0].message.content.trim());
         console.log('LLM extracted parameters:', extractedParams);
         
-        // Merge the extracted parameters with the existing appointmentDetails
         Object.assign(appointmentDetails, extractedParams);
         
-        // Update the missing fields list
         const updatedMissingFields = requiredFields.filter(field => !appointmentDetails[field]);
         console.log('Missing fields after LLM extraction:', updatedMissingFields);
       } catch (extractionError) {
@@ -771,6 +734,18 @@ Rules:
     }
 
     if (missingFields.length === 0) {
+      const isConfirmed = await verifyConfirmation(query, req.session.chatHistory);
+      if (!isConfirmed) {
+        console.log('Appointment not confirmed by user');
+        const responseData = {
+          response: response + ' Please confirm the appointment details.',
+          appointmentDetails,
+          missingFields,
+          previousAppointments: previousAppointments.length > 0 ? previousAppointments : undefined
+        };
+        return res.json(responseData);
+      }
+
       const dateTime = combineDateTime(appointmentDetails.Appointment_Date__c, appointmentDetails.Appointment_Time__c);
       if (!dateTime) {
         console.error('Invalid dateTime format, cannot create appointment');
@@ -787,14 +762,26 @@ Rules:
         Contact__c: '003dM000005H5A7QAK',
         ...(appointmentDetails.Banker__c && appointmentDetails.Banker__c.match(/^005/) && { Banker__c: appointmentDetails.Banker__c }),
       };
-    
-      // console.log('Creating appointment in Salesforce with data:', JSON.stringify(fullAppointmentData, null, 2));
+
       const createResult = await conn.sobject('Appointment__c').create(fullAppointmentData);
       if (createResult.success) {
         appointmentId = createResult.id;
         appointmentDetails.Id = appointmentId;
         appointmentDetails.Appointment_Time__c = dateTime;
-        // console.log('Appointment created in Salesforce with ID:', appointmentId);
+
+        if (req.session.sfChatId) {
+          await conn.sobject('Chat_Session__c').update({
+            Id: req.session.sfChatId,
+            Appointment_Status__c: 'completed',
+            Last_Updated__c: new Date().toISOString()
+          });
+          console.log('Chat session marked as completed:', req.session.sfChatId);
+          req.session.referralState = 'completed';
+        }
+
+        req.session.chatHistory = [];
+        req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
+        req.session.sfChatId = null;
       } else {
         console.error('Failed to create appointment in Salesforce:', createResult);
         throw new Error('Failed to create appointment in Salesforce: ' + JSON.stringify(createResult.errors));
@@ -807,7 +794,6 @@ Rules:
       missingFields,
       previousAppointments: previousAppointments.length > 0 ? previousAppointments : undefined
     };
-    // console.log('Sending response to client:', JSON.stringify(responseData, null, 2));
     res.json(responseData);
   } catch (error) {
     console.error('Error processing chat request:', error.message);
@@ -842,7 +828,6 @@ app.get('/api/chat/state', optionalAuthenticate, (req, res) => {
     messages: req.session.chatHistory.filter(msg => msg.role !== 'system'),
     appointmentDetails: parsed.appointmentDetails || null
   };
-  // console.log('Sending chat state to client:', JSON.stringify(responseData, null, 2));
   res.json(responseData);
 });
 
@@ -856,16 +841,12 @@ app.post('/api/verify-confirmation', async (req, res) => {
 
   const userText = text || 'No specific input provided by the user';
 
-  // Get the last 2 or 3 messages from the chatHistory
-  const recentChatHistory = chatHistory.slice(-3);
-
   try {
     const messages = [
       { role: 'system', content: 'Return me true or false if the user has confirmed booking the appointment.' },
-      ...recentChatHistory.map(msg => ({ role: msg.type === 'user' ? 'user' : 'assistant', content: msg.text })),
+      ...chatHistory.slice(-3).map(msg => ({ role: msg.type === 'user' ? 'user' : 'assistant', content: msg.text })),
     ];
 
-    // If userText is provided, add it to the messages
     if (text) {
       messages.splice(1, 0, { role: 'user', content: userText });
     }
@@ -900,7 +881,7 @@ app.get('/api/salesforce/banker-notes', authenticate, async (req, res) => {
     console.log('Salesforce banker notes retrieved:', bankerNotes);
     res.json({ bankerNotes });
   } catch (error) {
-    console.error('Error fetching banker notes:', error.message);
+    console.error('Error fetching banker notes:', error);
     res.status(500).json({ message: 'Failed to fetch banker notes', error: error.message });
   }
 });
@@ -919,7 +900,7 @@ app.post('/api/salesforce/visit-history', authenticate, async (req, res) => {
     console.log('Salesforce visit history retrieved:', JSON.stringify(result.records, null, 2));
     res.json(result);
   } catch (error) {
-    console.error('Error fetching visit history:', error.message);
+    console.error('Error fetching visit history:', error);
     res.status(500).json({ message: 'Failed to fetch visit history', error: error.message });
   }
 });
@@ -933,7 +914,6 @@ app.post('/api/chat/recommendations', authenticate, async (req, res) => {
       return res.status(400).json({ message: 'Missing or invalid visitReasons' });
     }
 
-    // Fetch banker notes if not provided
     let notes = bankerNotes || [];
     if (!notes.length) {
       const conn = getSalesforceConnection();
@@ -943,20 +923,17 @@ app.post('/api/chat/recommendations', authenticate, async (req, res) => {
       console.log('Salesforce banker notes retrieved:', notes);
     }
 
-    // Preprocess visit reasons to remove extra details and focus on key intent
     const simplifiedVisitReasons = visitReasons.map(reason =>
-      reason.replace(/:.*$/, '').trim() // Remove everything after ":"
+      reason.replace(/:.*$/, '').trim()
     ).filter(reason => reason.length > 0);
 
-    // Prepare context for LLM
     const contextData = `
-Visit Reasons: ${simplifiedVisitReasons.join(', ')}
-Banker Notes: ${notes.join('; ') || 'No banker notes available.'}
-${currentReason ? `Current Appointment Reason: ${currentReason}` : 'No current appointment reason provided.'}
-Available Product Categories: ${Object.keys(productMapping).join(', ')}
-`;
+ Visit Reasons: ${simplifiedVisitReasons.join(', ')}
+ Banker Notes: ${notes.join('; ') || 'No banker notes available.'}
+ ${currentReason ? `Current Appointment Reason: ${currentReason}` : 'No current appointment reason provided.'}
+ Available Product Categories: ${Object.keys(productMapping).join(', ')}
+ `;
 
-    // LLM Prompt with strict JSON enforcement
     const prompt = `
 You are a banking assistant tasked with recommending products based on a customer's visit history, banker notes, and current appointment reason. Use the following context to suggest up to 3 products from the available categories.
 
@@ -981,7 +958,7 @@ Rules:
     });
 
     const llmOutput = openaiResponse.choices[0].message.content.trim();
-    console.log('Raw LLM response:', llmOutput); // Log raw response for debugging
+    console.log('Raw LLM response:', llmOutput);
     let parsedResponse;
     try {
       parsedResponse = JSON.parse(llmOutput);
@@ -993,16 +970,14 @@ Rules:
       parsedResponse = { recommendations: [], reason: 'Error parsing LLM response.' };
     }
 
-    // Map LLM-recommended categories to actual products
     const recommendedCategories = parsedResponse.recommendations || [];
     const recommendations = [];
     for (const category of recommendedCategories) {
       if (productMapping[category]) {
-        recommendations.push(productMapping[category][0]); // Pick the first product from the category
+        recommendations.push(productMapping[category][0]);
       }
     }
 
-    // Fallback to defaults if no recommendations
     if (!recommendations.length) {
       recommendations.push(...defaultRecommendations.slice(0, 3));
       parsedResponse.reason = parsedResponse.reason || 'No specific recommendations matched; providing default products.';
@@ -1022,7 +997,6 @@ Rules:
   }
 });
 
-// New endpoint for generating dynamic quick reply suggestions
 app.post('/api/suggestedReplies', async (req, res) => {
   try {
     const { chatHistory, userQuery, userType, sfData } = req.body;
@@ -1031,12 +1005,10 @@ app.post('/api/suggestedReplies', async (req, res) => {
       return res.status(400).json({ message: 'Missing required parameters' });
     }
 
-    // Format chat history for the LLM
     const formattedChatHistory = chatHistory.map(msg => {
       return `${msg.type === 'user' ? 'User' : 'Assistant'}: ${msg.text}`;
     }).join('\n');
 
-    // Format Salesforce data if available
     let sfContext = '';
     if (sfData) {
       if (sfData.appointments && sfData.appointments.length > 0) {
@@ -1053,7 +1025,6 @@ app.post('/api/suggestedReplies', async (req, res) => {
       }
     }
 
-    // System prompt to guide the LLM's behavior
     const systemPrompt = `
     You are a banking assistant that generates contextually relevant quick reply suggestions for users.
     Based on the conversation history and user's latest query, generate 3 short, helpful suggested replies.
@@ -1071,7 +1042,6 @@ app.post('/api/suggestedReplies', async (req, res) => {
     ${sfContext}
     `;
 
-    // Call OpenAI API to generate suggestions
     const openaiResponse = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -1083,7 +1053,6 @@ app.post('/api/suggestedReplies', async (req, res) => {
       response_format: { type: "json_object" }
     });
 
-    // Parse the response
     const responseContent = openaiResponse.choices[0].message.content.trim();
     let suggestions = [];
     
@@ -1091,11 +1060,9 @@ app.post('/api/suggestedReplies', async (req, res) => {
       const parsedResponse = JSON.parse(responseContent);
       suggestions = parsedResponse.suggestions || [];
       
-      // Ensure we have exactly 3 suggestions
       if (suggestions.length > 3) {
         suggestions = suggestions.slice(0, 3);
       } else if (suggestions.length < 3) {
-        // Add default suggestions if we don't have enough
         const defaultSuggestions = [
           "Book an appointment",
           "Find nearest branch",
@@ -1113,7 +1080,6 @@ app.post('/api/suggestedReplies', async (req, res) => {
       }
     } catch (error) {
       console.error('Error parsing suggestions:', error);
-      // Fallback to default suggestions
       suggestions = [
         "Book an appointment",
         "Find nearest branch",
@@ -1131,6 +1097,84 @@ app.post('/api/suggestedReplies', async (req, res) => {
     });
   }
 });
+
+async function saveChatHistoryToSalesforce({ contactId, chatHistory, referralState }) {
+  try {
+    console.log('Saving chat history to Salesforce with referralState:', referralState);
+    const conn = getSalesforceConnection();
+    const query = `SELECT Id FROM Chat_Session__c WHERE Contact__c = '${contactId}' AND Appointment_Status__c = 'in_progress'`;
+    const result = await conn.query(query);
+    let recordId = result.records.length > 0 ? result.records[0].Id : null;
+    const now = new Date().toISOString();
+    const data = {
+      Name: `Chat History for ${contactId}`,
+      Contact__c: contactId,
+      History__c: JSON.stringify(chatHistory),
+      Appointment_Status__c: referralState,
+      Last_Updated__c: now
+    };
+    if (recordId) {
+      await conn.sobject('Chat_Session__c').update({ Id: recordId, ...data });
+      console.log('Updated existing chat session:', recordId);
+      return recordId;
+    } else {
+      const createResult = await conn.sobject('Chat_Session__c').create(data);
+      console.log('Created new chat session:', createResult.id);
+      return createResult.id;
+    }
+  } catch (error) {
+    console.error('Error saving chat history to Salesforce:', error);
+    throw error;
+  }
+}
+
+async function loadChatHistoryFromSalesforce(contactId) {
+  try {
+    const conn = getSalesforceConnection();
+    const query = `SELECT Id, History__c, Appointment_Status__c FROM Chat_Session__c WHERE Contact__c = '${contactId}' AND Appointment_Status__c = 'in_progress' ORDER BY Last_Updated__c DESC LIMIT 1`;
+    const result = await conn.query(query);
+    if (result.records.length > 0) {
+      const record = result.records[0];
+      return {
+        id: record.Id,
+        chatHistory: record.History__c ? JSON.parse(record.History__c) : [],
+        referralState: record.Appointment_Status__c
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error loading chat history from Salesforce:', error);
+    return null;
+  }
+}
+
+async function verifyConfirmation(text, chatHistory) {
+  console.log('Verifying confirmation for text:', text);
+  try {
+    const messages = [
+      { role: 'system', content: 'Return true or false if the user has confirmed booking the appointment.' },
+      ...chatHistory
+        .filter(msg => msg.role !== 'system')
+        .slice(-3)
+        .map(msg => ({ role: msg.role, content: msg.role === 'assistant' ? JSON.parse(msg.content).response || msg.content : msg.content })),
+      { role: 'user', content: text }
+    ];
+
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: messages,
+      max_tokens: 50,
+      temperature: 0.5,
+    });
+
+    const llmOutput = openaiResponse.choices[0].message.content.trim();
+    console.log('Confirmation verification response:', llmOutput);
+    return llmOutput.toLowerCase().includes('true') || llmOutput.toLowerCase().includes('confirmed') || llmOutput.toLowerCase().includes('yes');
+  } catch (error) {
+    console.error('Error verifying confirmation:', error);
+    return false;
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`Backend server is running on port ${PORT}`);
