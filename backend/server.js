@@ -1,9 +1,11 @@
-const express = require('express');
-const jsforce = require('jsforce');
-const { OpenAI } = require('openai');
-require('dotenv').config();
-const cors = require('cors');
-const session = require('express-session');
+import express from 'express';
+import jsforce from 'jsforce';
+import { OpenAI } from 'openai';
+import dotenv from 'dotenv';
+import cors from 'cors';
+import session from 'express-session';
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -133,7 +135,7 @@ function extractJSON(str) {
         console.error('Error parsing JSON from regex match:', e.message);
       }
     }
-  }
+  }``
   console.log('No valid JSON found, returning empty object');
   return '{}';
 }
@@ -269,8 +271,8 @@ const optionalAuthenticate = (req, res, next) => {
   next();
 };
 
-async function generatePersonalizedGreeting(customerType, chatHistory, username) {
-  console.log('Generating personalized greeting for:', { customerType, username });
+async function generatePersonalizedGreeting(customerType, chatHistory, username, incompleteAppointment) {
+  console.log('Generating personalized greeting for:', { customerType, username, incompleteAppointment });
   try {
     let contextData = '';
     if (chatHistory && chatHistory.chatHistory && chatHistory.chatHistory.length > 0) {
@@ -279,25 +281,20 @@ async function generatePersonalizedGreeting(customerType, chatHistory, username)
         .map(msg => msg.content)
         .filter(content => content.includes('reason') || content.includes('appointment'))
         .join('; ');
-      const guidedFlow = chatHistory.guidedFlow || {};
-      contextData = `
-Previous Interactions: ${pastReasons || 'No specific reasons provided.'}
-Guided Flow Data: Reason: ${guidedFlow.reason || 'None'}, Location: ${guidedFlow.location || 'None'}
-`;
+      contextData = `Previous Interactions: ${pastReasons || 'No specific reasons provided.'}`;
+    }
+
+    let appointmentContext = '';
+    if (incompleteAppointment && (incompleteAppointment.reason || incompleteAppointment.date || incompleteAppointment.time || incompleteAppointment.location)) {
+      appointmentContext = `\n\nUnfinished Appointment Details:\n` +
+        `- Reason: ${incompleteAppointment.reason || 'Not specified'}\n` +
+        `- Date: ${incompleteAppointment.date || 'Not specified'}\n` +
+        `- Time: ${incompleteAppointment.time || 'Not specified'}\n` +
+        `- Location: ${incompleteAppointment.location || 'Not specified'}\n`;
     }
 
     const prompt = `
-You are a friendly bank appointment assistant. Generate a personalized greeting for a user based on their customer type and previous interactions. The greeting should:
-- Welcome the user by name (if available, use "${username}" or "Guest" for guests).
-- Reference their customer type (e.g., "valued customer" for Regular, "guest" for Guest).
-- If previous interactions exist, subtly mention past appointment reasons or locations (e.g., "I see you've visited Brooklyn before").
-- End with a question like "How can I help you today?" or similar.
-- Keep the tone warm and professional.
-- Return the greeting as a plain string, no JSON or extra formatting.
-
-Customer Type: ${customerType}
-Username: ${username || 'Guest'}
-${contextData ? `Context Information:\n${contextData}` : 'No prior context available.'}
+You are a friendly bank appointment assistant. Generate a personalized greeting for a user based on their customer type, previous interactions, and any unfinished appointment.\n\nThe greeting should:\n- Welcome the user by name (if available, use \"${username}\" or \"Guest\" for guests).\n- Reference their customer type (e.g., \"valued customer\" for Regular, \"guest\" for Guest).\n- If there is an unfinished appointment, mention the details (reason, date, time, location) and ask if the user wants to continue booking it.\n- If previous interactions exist, subtly mention past appointment reasons or locations.\n- End with a question like \"How can I help you today?\" or similar.\n- Keep the tone warm and professional.\n- Return the greeting as a plain string, no JSON or extra formatting.\n\nCustomer Type: ${customerType}\nUsername: ${username || 'Guest'}\n${contextData ? `Context Information:\n${contextData}` : 'No prior context available.'}${appointmentContext}
 `;
 
     const openaiResponse = await openai.chat.completions.create({
@@ -353,18 +350,24 @@ app.post('/api/auth/login', async (req, res) => {
     // Load or initialize chat session
     const sfChat = await loadChatHistoryFromSalesforce(contactId);
     let greeting;
+    let incompleteAppointment = null;
     if (sfChat && sfChat.chatHistory) {
       req.session.chatHistory = sfChat.chatHistory.chatHistory || [];
       req.session.guidedFlow = sfChat.chatHistory.guidedFlow || { reason: null, date: null, time: null, location: null };
       req.session.referralState = sfChat.referralState;
       req.session.sfChatId = sfChat.id;
       console.log('Loaded existing chat session from Salesforce');
-      greeting = await generatePersonalizedGreeting('Regular', sfChat.chatHistory, username);
+      // Check for incomplete appointment (guidedFlow with any non-null field)
+      const guided = req.session.guidedFlow;
+      if (guided && (guided.reason || guided.date || guided.time || guided.location)) {
+        incompleteAppointment = guided;
+      }
+      greeting = await generatePersonalizedGreeting('Regular', sfChat.chatHistory, username, incompleteAppointment);
     } else {
       req.session.chatHistory = [];
       req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
       req.session.referralState = 'in_progress';
-      greeting = await generatePersonalizedGreeting('Regular', null, username);
+      greeting = await generatePersonalizedGreeting('Regular', null, username, null);
     }
 
     // Initialize chat history with greeting
@@ -385,7 +388,6 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Error managing chat session on login:', error);
   }
-
   res.json({ message: 'Login successful', username });
 });
 
@@ -488,22 +490,22 @@ app.post('/api/salesforce/appointments', authenticate, async (req, res) => {
 //       return res.status(401).json({ message: 'Session expired or invalid', error: 'SESSION_EXPIRED' });
 //     }
 
-    const contactId = '003dM000005H5A7QAK';
+    // const contactId = '003dM000005H5A7QAK';
 
-    if (!req.session.guidedFlow) {
-      const sfChat = await loadChatHistoryFromSalesforce(contactId);
-      if (sfChat && sfChat.chatHistory) {
-        req.session.guidedFlow = sfChat.chatHistory.guidedFlow || { reason: null, date: null, time: null, location: null };
-        req.session.chatHistory = sfChat.chatHistory.chatHistory || [];
-        req.session.referralState = sfChat.referralState;
-        req.session.sfChatId = sfChat.id;
-        console.log('Loaded unfinished guided flow from Salesforce');
-      } else {
-        initGuidedFlowSession(req);
-        req.session.chatHistory = [];
-        req.session.referralState = 'in_progress';
-      }
-    }
+    // if (!req.session.guidedFlow) {
+    //   const sfChat = await loadChatHistoryFromSalesforce(contactId);
+    //   if (sfChat && sfChat.chatHistory) {
+    //     req.session.guidedFlow = sfChat.chatHistory.guidedFlow || { reason: null, date: null, time: null, location: null };
+    //     req.session.chatHistory = sfChat.chatHistory.chatHistory || [];
+    //     req.session.referralState = sfChat.referralState;
+    //     req.session.sfChatId = sfChat.id;
+    //     console.log('Loaded unfinished guided flow from Salesforce');
+    //   } else {
+    //     initGuidedFlowSession(req);
+    //     req.session.chatHistory = [];
+    //     req.session.referralState = 'in_progress';
+    //   }
+    // }
 
 //     // We'll store the partial data in session so we can finalize at the "confirmation" step
 //     const flowData = req.session.guidedFlow;  // { reason, date, time, location }
@@ -572,25 +574,25 @@ app.post('/api/salesforce/appointments', authenticate, async (req, res) => {
 //       temperature: 0.7,
 //     });
 
-    const llmOutput = openaiResponse.choices[0].message.content.trim();
-    req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
+    // const llmOutput = openaiResponse.choices[0].message.content.trim();
+    // req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
 
-    try {
-      req.session.sfChatId = await saveChatHistoryToSalesforce({
-        contactId,
-        chatHistory: {
-          guidedFlow: req.session.guidedFlow,
-          chatHistory: req.session.chatHistory
-        },
-        referralState: guidedStep === 'confirmation' && isConfirmed ? 'completed' : 'in_progress'
-      });
-      console.log('Chat history saved to Salesforce:', req.session.sfChatId);
-    } catch (error) {
-      console.error('Error saving chat history to Salesforce:', error);
-    }
+    // try {
+    //   req.session.sfChatId = await saveChatHistoryToSalesforce({
+    //     contactId,
+    //     chatHistory: {
+    //       guidedFlow: req.session.guidedFlow,
+    //       chatHistory: req.session.chatHistory
+    //     },
+    //     referralState: guidedStep === 'confirmation' && isConfirmed ? 'completed' : 'in_progress'
+    //   });
+    //   console.log('Chat history saved to Salesforce:', req.session.sfChatId);
+    // } catch (error) {
+    //   console.error('Error saving chat history to Salesforce:', error);
+    // }
 
-    req.session.referralState = guidedStep === 'confirmation' && isConfirmed ? 'completed' : 'in_progress';
-    req.session.save(() => {});
+    // req.session.referralState = guidedStep === 'confirmation' && isConfirmed ? 'completed' : 'in_progress';
+    // req.session.save(() => {});
 
 //     // Attempt to parse the LLM JSON
 //     let parsed;
