@@ -627,7 +627,9 @@ Banker ID: ${r.Banker__c || 'Not specified'}`;
     req.session.chatHistory.push({ role: 'user', content: query });
 
     const prompt = `
-You are a bank appointment booking assistant. Based on the user's query and context, suggest appointment details and respond naturally. Maintain conversational flow using the chat history.
+   You are a smart, human-like, and proactive bank appointment assistant. Based on the user's query and context, suggest appointment details and respond in 1–2 crisp, helpful lines using natural and empathetic tone. Maintain conversational flow using the chat history. If this is the first user message in the current session then only begin your reply with "Hey ${
+     req.session.user?.username || "there"
+   },". 
 
 Current Date: ${new Date().toISOString().split('T')[0]}
 User Query: ${query}
@@ -650,6 +652,11 @@ Rules:
 - Respond in natural language under "response" and provide structured data under "appointmentDetails".
 - Return JSON like: {"response": "Here's a suggestion...", "appointmentDetails": {...}}
 - If the user has already entered all the required details, do not ask for them again.
+- Suggest earlier slots if the scenario is urgent.
+- Prioritize after-school hours(3-5) for student users.
+- Merge overlapping appointments across locations when practical.
+- Prefer user’s common booking time (morning/evening).
+- Add a friendly reminder to bring required documents (e.g., ID proof, address proof, recent statements) once user confirm the appointment.
 `;
 
     const systemPrompt = { role: 'system', content: prompt };
