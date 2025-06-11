@@ -6,14 +6,6 @@ import cors from 'cors';
 import session from 'express-session';
 
 dotenv.config();
-import express from 'express';
-import jsforce from 'jsforce';
-import { OpenAI } from 'openai';
-import dotenv from 'dotenv';
-import cors from 'cors';
-import session from 'express-session';
-
-dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -143,7 +135,7 @@ function extractJSON(str) {
         console.error('Error parsing JSON from regex match:', e.message);
       }
     }
-  }``
+  }
   console.log('No valid JSON found, returning empty object');
   return '{}';
 }
@@ -280,14 +272,14 @@ const optionalAuthenticate = (req, res, next) => {
 };
 
 app.post('/api/generate-greeting', optionalAuthenticate, async (req, res) => {
-  // Determine customer type based on login status
   const customerType = req.user && req.user.username !== 'guest' ? 'Valued Customer' : 'Guest';
   const username = req.user ? req.user.username : 'Guest';
   console.log('Generating personalized greeting for:', { customerType, username });
+
   try {
     let contextData = '';
-    if (chatHistory && chatHistory.chatHistory && chatHistory.chatHistory.length > 0) {
-      const pastReasons = chatHistory.chatHistory
+    if (req.session.chatHistory && Array.isArray(req.session.chatHistory) && req.session.chatHistory.length > 0) {
+      const pastReasons = req.session.chatHistory
         .filter(msg => msg.role === 'user')
         .map(msg => msg.content)
         .filter(content => content.includes('reason') || content.includes('appointment'))
@@ -296,6 +288,7 @@ app.post('/api/generate-greeting', optionalAuthenticate, async (req, res) => {
     }
 
     let appointmentContext = '';
+    const incompleteAppointment = req.session.guidedFlow;
     if (incompleteAppointment && (incompleteAppointment.reason || incompleteAppointment.date || incompleteAppointment.time || incompleteAppointment.location)) {
       appointmentContext = `\n\nUnfinished Appointment Details:\n` +
         `- Reason: ${incompleteAppointment.reason || 'Not specified'}\n` +
@@ -317,10 +310,11 @@ You are a friendly bank appointment assistant. Generate a personalized greeting 
 
     const greeting = openaiResponse.choices[0].message.content.trim();
     console.log('Generated greeting:', greeting);
-    return greeting;
+    return res.json({ greeting });
   } catch (error) {
     console.error('Error generating personalized greeting:', error);
-    return `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
+    const fallbackGreeting = `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
+    return res.json({ greeting: fallbackGreeting });
   }
 });
 
@@ -358,7 +352,7 @@ app.post('/api/auth/login', async (req, res) => {
       console.log('Marked in-progress sessions as completed:', result.records.length);
     }
 
-    // Load or initialize chat session
+    // Load the most recent chat session
     const sfChat = await loadChatHistoryFromSalesforce(contactId);
     let greeting;
     let incompleteAppointment = null;
@@ -367,21 +361,30 @@ app.post('/api/auth/login', async (req, res) => {
       req.session.guidedFlow = sfChat.chatHistory.guidedFlow || { reason: null, date: null, time: null, location: null };
       req.session.referralState = sfChat.referralState;
       req.session.sfChatId = sfChat.id;
-      console.log('Loaded existing chat session from Salesforce');
-      // Check for incomplete appointment (guidedFlow with any non-null field)
+      console.log('Loaded existing chat session from Salesforce:', sfChat.id);
+
+      // Check for incomplete appointment
       const guided = req.session.guidedFlow;
       if (guided && (guided.reason || guided.date || guided.time || guided.location)) {
         incompleteAppointment = guided;
       }
-      greeting = await generatePersonalizedGreeting('Regular', sfChat.chatHistory, username, incompleteAppointment);
+
+      // Generate greeting with the loaded chat history
+      greeting = await generatePersonalizedGreeting(
+        'Regular',
+        { chatHistory: req.session.chatHistory, guidedFlow: req.session.guidedFlow },
+        username,
+        incompleteAppointment
+      );
     } else {
+      // No previous session found, initialize a new one
       req.session.chatHistory = [];
       req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
       req.session.referralState = 'in_progress';
       greeting = await generatePersonalizedGreeting('Regular', null, username, null);
     }
 
-    // Initialize chat history with greeting
+    // Initialize chat history with the greeting
     req.session.chatHistory = [
       { role: 'assistant', content: JSON.stringify({ response: greeting, appointmentDetails: null }) }
     ];
@@ -396,10 +399,19 @@ app.post('/api/auth/login', async (req, res) => {
       referralState: 'in_progress'
     });
     console.log('Created new chat session:', req.session.sfChatId);
+
+    // Return the greeting and initial session state
+    res.json({
+      message: 'Login successful',
+      username,
+      greeting,
+      chatHistory: req.session.chatHistory,
+      guidedFlow: req.session.guidedFlow
+    });
   } catch (error) {
     console.error('Error managing chat session on login:', error);
+    res.status(500).json({ message: 'Login failed', error: error.message });
   }
-  res.json({ message: 'Login successful', username });
 });
 
 app.get('/api/session-health', (req, res) => {
@@ -1093,7 +1105,7 @@ app.post('/api/suggestedReplies', async (req, res) => {
         "Find nearest branch",
         "Check my appointments"
       ];
-    }
+    }``
 
     res.json({ suggestions });
   } catch (error) {
@@ -1139,7 +1151,7 @@ async function saveChatHistoryToSalesforce({ contactId, chatHistory, referralSta
 async function loadChatHistoryFromSalesforce(contactId) {
   try {
     const conn = getSalesforceConnection();
-    const query = `SELECT Id, History__c, Appointment_Status__c FROM Chat_Session__c WHERE Contact__c = '${contactId}' AND Appointment_Status__c = 'in_progress' ORDER BY Last_Updated__c DESC LIMIT 1`;
+    const query = `SELECT Id, History__c, Appointment_Status__c FROM Chat_Session__c WHERE Contact__c = '${contactId}' ORDER BY Last_Updated__c DESC LIMIT 1`;
     const result = await conn.query(query);
     if (result.records.length > 0) {
       const record = result.records[0];
@@ -1153,6 +1165,45 @@ async function loadChatHistoryFromSalesforce(contactId) {
   } catch (error) {
     console.error('Error loading chat history from Salesforce:', error);
     return null;
+  }
+}
+
+async function generatePersonalizedGreeting(customerType, customerInfo, username, incompleteAppointment = null) {
+  try {
+    let contextData = '';
+    if (customerInfo && customerInfo.chatHistory && Array.isArray(customerInfo.chatHistory) && customerInfo.chatHistory.length > 0) {
+      const pastReasons = customerInfo.chatHistory
+        .filter(msg => msg.role === 'user')
+        .map(msg => msg.content)
+        .filter(content => content.includes('reason') || content.includes('appointment'))
+        .join('; ');
+      contextData = `Previous Interactions: ${pastReasons || 'No specific reasons provided.'}`;
+    }
+
+    let appointmentContext = '';
+    if (incompleteAppointment && (incompleteAppointment.reason || incompleteAppointment.date || incompleteAppointment.time || incompleteAppointment.location)) {
+      appointmentContext = `\n\nUnfinished Appointment Details:\n` +
+        `- Reason: ${incompleteAppointment.reason || 'Not specified'}\n` +
+        `- Date: ${incompleteAppointment.date || 'Not specified'}\n` +
+        `- Time: ${incompleteAppointment.time || 'Not specified'}\n` +
+        `- Location: ${incompleteAppointment.location || 'Not specified'}\n`;
+    }
+
+    const prompt = `
+You are a friendly bank appointment assistant. Generate a personalized greeting for a user based on their customer type, previous interactions, and any unfinished appointment.\n\nThe greeting should:\n- Welcome the user by name (if available, use \"${username}\" or \"Guest\" for guests).\n- Reference their customer type (e.g., \"valued customer\" for Regular, \"guest\" for Guest).\n- If there is an unfinished appointment, mention the details (reason, date, time, location) and ask if the user wants to continue booking it.\n- If previous interactions exist, subtly mention past appointment reasons or locations.\n- End with a question like \"How can I help you today?\" or similar.\n- Keep the tone warm and professional.\n- Return the greeting as a plain string, no JSON or extra formatting.\n\nCustomer Type: ${customerType}\nUsername: ${username || 'Guest'}\n${contextData ? `Context Information:\n${contextData}` : 'No prior context available.'}${appointmentContext}
+`;
+
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'system', content: prompt }],
+      max_tokens: 100,
+      temperature: 0.7,
+    });
+
+    return openaiResponse.choices[0].message.content.trim();
+  } catch (error) {
+    console.error('Error generating personalized greeting:', error);
+    return `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
   }
 }
 
