@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 're
 import { Send, MessageSquare, AlertCircle, CheckCircle, Mic, Bookmark } from 'lucide-react';
 import clsx from 'clsx';
 import QuickReplyButtons from './QuickReplyButtons';
+import { ChatInterfaceProps, ChatInterfaceHandle, Message, AppointmentDetails, GuidedStep } from './types';
 
 // SpeechRecognition support
 declare global {
@@ -11,66 +12,32 @@ declare global {
   }
 }
 
-interface ChatInterfaceProps {
-  isLoggedIn: boolean;
-  userName: string;
-  userType: 'guest' | 'customer' | null;
-  token?: string | null; // Kept for compatibility, but not used
-  isGuidedMode: boolean;
-  onReasonChange: (reason: string | undefined) => void;
-  onToggleRecommendations: () => void;
-}
-
-export interface ChatInterfaceHandle {
-  handleSend: (text: string) => void;
-}
-
-interface Message {
-  text: string;
-  type: 'assistant' | 'user';
-  isLoading?: boolean;
-}
-
-interface AppointmentDetails {
-  Reason_for_Visit__c: string | null;
-  Appointment_Date__c: string | null;
-  Appointment_Time__c: string | null;
-  Location__c: string | null;
-  Customer_Type__c: string | null;
-  Id?: string;
-}
-
 const API_BASE_URL = 'http://localhost:3000/api';
 
 const CUSTOMER_PROMPTS = [
-  "I need an appointment with my preferred banker and branch",
-  "Reschedule my upcoming appointment to next Tuesday at 2pm",
-  "Find me a branch within 5 miles with 24hrs Drive-thru ATM service"
+  'I need an appointment with my preferred banker and branch',
+  'Reschedule my upcoming appointment to next Tuesday at 2pm',
+  'Find me a branch within 5 miles with 24hrs Drive-thru ATM service',
 ];
 const GUEST_PROMPTS = [
-  "I'm new and want to open an account",
-  "I need help with a loan application",
-  "Can I schedule an appointment for tomorrow?"
+  'I’m new and want to open an account',
+  'I need help with a loan application',
+  'Can I schedule an appointment for tomorrow?',
 ];
 
 const PLACEHOLDER_SUGGESTIONS = [
-  "For Example .... Book an appointment for next Monday 2pm at Manhattan for a loan consultation",
-  "For Example .... Find me the nearest branch with 24hrs Check Deposit with drive-thru service",
-  "For Example .... Reschedule my upcoming appointment on 6th March at 3pm",
-  "For Example .... Check my upcoming bookings",
+  'For Example .... Book an appointment for next Monday 2pm at Manhattan for a loan consultation',
+  'For Example .... Find me the nearest branch with 24hrs Check Deposit with drive-thru service',
+  'For Example .... Reschedule my upcoming appointment on 6th March at 3pm',
+  'For Example .... Check my upcoming bookings',
 ];
-
-const GUIDED_REASONS = [
-  "Open a new account",
-  "Apply for a credit card",
-  "Manage spending and saving",
-  "Build credit and reduce debt",
-  "Death of a loved one",
-  "Questions or assistance with MYBANK products and services",
-  "Save for retirement",
-];
-
-type GuidedStep = 'reason' | 'date' | 'location' | 'confirmation' | 'completed' | 'reasonSelection' | 'timeSelection' | 'locationSelection';
+const debounce = (func: (...args: any[]) => void, wait: number) => {
+  let timeout: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+};
 
 function formatAppointmentTime(isoDateTime: string | null): string {
   if (!isoDateTime) return '(Not specified)';
@@ -87,6 +54,33 @@ function formatAppointmentTime(isoDateTime: string | null): string {
   let formatted = date.toLocaleString('en-US', options);
   formatted = formatted.replace(/(\d+),/, '$1th,');
   return formatted;
+}
+
+async function generatePersonalizedGreeting(customerType: string, chatHistory: any[] = [], username?: string): Promise<string> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/generate-greeting`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        customerType,
+        chatHistory,
+        username,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.greeting;
+  } catch (error) {
+    console.error('Error generating personalized greeting:', error);
+    return `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
+  }
 }
 
 const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
@@ -112,11 +106,10 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   // Guided flow states
   const [guidedStep, setGuidedStep] = useState<GuidedStep>('reason');
   const [selectedReason, setSelectedReason] = useState('');
-  const [llmDateSuggestions, setLLMDateSuggestions] = useState<{ display: string; raw: string }[]>([]);
-  const [selectedDateTime, setSelectedDateTime] = useState<{ display: string; raw: string }>({ display: '', raw: '' });
-  const [llmLocationOptions, setLLMLocationOptions] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
-  const [overrideUsed, setOverrideUsed] = useState(false);
+  const [suggestionType, setSuggestionType] = useState<'reason' | 'time' | 'location' | 'confirmation'>('reason');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any | null>(null);
@@ -130,13 +123,11 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   // State for dynamic quick reply suggestions
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
 
-  // Default prompts for unguided flow
   const prompts = userType === 'customer' ? CUSTOMER_PROMPTS : GUEST_PROMPTS;
 
   const fetchAppointmentStatus = async () => {
     const component = await renderAppointmentStatus();
     setAppointmentStatusComponent(component);
-
   };
 
   useImperativeHandle(ref, () => ({
@@ -155,7 +146,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-  const chatWithAssistant = async (query: string) => {
+  const chatWithAssistant = async (query: string, step: GuidedStep = guidedStep) => {
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
@@ -178,116 +169,153 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
     const data = await response.json();
 
-    // Get dynamic suggested replies
-    try {
-      const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+    // Fetch suggested replies
+    const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        chatHistory: messages,
+        userQuery: query,
+        userType: userType === 'customer' ? 'Regular' : 'Guest',
+        sfData: {
+          appointments: appointmentStatus.details ? [appointmentStatus.details] : [],
+          customerInfo: {
+            Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest',
+            Preferred_Branch__c: appointmentStatus.details?.Location__c,
+            Contact__c: '003dM000005H5A7QAK',
+          },
         },
-        credentials: 'include',
-        body: JSON.stringify({
-          chatHistory: messages,
-          userQuery: query,
-          userType: userType === 'customer' ? 'Regular' : 'Guest',
-          sfData: appointmentStatus.details ? {
-            appointments: [appointmentStatus.details],
-            customerInfo: {
-              Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest',
-              Preferred_Branch__c: appointmentStatus.details.Location__c
-            }
-          } : null
-        }),
-      });
+        missingFields: data.missingFields || [],
+        guidedFlow: {
+          reason: selectedReason || null,
+          date: selectedDate || null,
+          time: selectedTime || null,
+          location: selectedLocation || null,
+        },
+      }),
+    });
 
-      if (suggestionsResponse.ok) {
-        const suggestionsData = await suggestionsResponse.json();
-        if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
-          setSuggestedReplies(suggestionsData.suggestions);
-        }
-      } else {
-        setSuggestedReplies([
-          "Book an appointment",
-          "Find nearest branch",
-          "Check my appointments",
-          "I need help"
-        ]);
+    let suggestions = [];
+    if (suggestionsResponse.ok) {
+      const suggestionsData = await suggestionsResponse.json();
+      if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
+        suggestions = suggestionsData.suggestions;
       }
-    } catch (error) {
-      console.error('Error fetching suggested replies:', error);
-      setSuggestedReplies([
-        "Book an appointment",
-        "Find nearest branch",
-        "Check my appointments",
-        "I need help"
-      ]);
     }
 
     return {
       response: data.response,
       appointmentDetails: data.appointmentDetails || null,
       missingFields: data.missingFields || [],
+      suggestions,
     };
   };
 
-  useEffect(() => {
-    if (guidedStep === 'completed') {
-      fetchAppointmentStatus();
+  const getDefaultMessages = async (): Promise<Message[]> => {
+    try {
+      const customerType = userType === 'customer' ? 'Regular' : 'Guest';
+      const chatHistoryForGreeting = messages.map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: msg.text,
+      }));
+
+      const personalizedGreeting = await generatePersonalizedGreeting(customerType, chatHistoryForGreeting, userName);
+
+      return [
+        { type: 'assistant', text: personalizedGreeting },
+        { type: 'assistant', text: 'I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!' },
+      ];
+    } catch (error) {
+      console.error('Error generating personalized greeting:', error);
+      const greeting = userType === 'customer' && userName
+        ? `Welcome back, ${userName}! How can I assist you with your banking needs today?`
+        : `Welcome to MyBank appointment booking! How can I help you today?`;
+      return [
+        { type: 'assistant', text: greeting },
+        { type: 'assistant', text: 'I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!' },
+      ];
     }
-  }, [guidedStep]);
+  };
 
+  // SpeechRecognition setup
   useEffect(() => {
-    // Fetch initial chat state when logged in
-    const fetchInitialState = async () => {
-      if (isLoggedIn) {
-        try {
-          const response = await fetch(`${API_BASE_URL}/chat/state`, {
-            credentials: 'include',
-          });
-          if (response.ok) {
-            const data = await response.json();
-            console.log('Fetched chat state:', data); // Debug log
-            if (data.messages && Array.isArray(data.messages)) {
-              const formattedMessages = data.messages.map((msg: any) => {
-                if (msg.role === 'assistant' && typeof msg.content === 'string') {
-                  try {
-                    const parsed = JSON.parse(msg.content);
-                    return { type: 'assistant', text: parsed.response || msg.content };
-                  } catch (e) {
-                    console.warn('Failed to parse assistant message content:', e);
-                    return { type: 'assistant', text: msg.content };
-                  }
-                }
-                return { type: msg.role === 'assistant' ? 'assistant' : 'user', text: msg.content };
-              });
-              setMessages(formattedMessages);
-            }
-            setAppointmentStatus({ details: data.appointmentDetails, missingFields: [] });
-          } else if (response.status === 401) {
-            setSessionError(true);
-            setMessages([{ type: 'assistant', text: 'Session expired. Please log in again.' }]);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+
+      let finalTranscript = '';
+      recognitionRef.current.onresult = (event: any) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' ';
+          } else {
+            interimTranscript += transcript;
           }
-        } catch (error) {
-          console.error('Error fetching initial chat state:', error);
-          setMessages([{ type: 'assistant', text: 'Error loading chat. Please try again.' }]);
         }
-      }
-    };
-    fetchInitialState();
-  }, [isLoggedIn]);
+        setInput(finalTranscript + interimTranscript);
+        if (finalTranscript) {
+          finalTranscript = ''; // Reset final transcript after processing
+        }
+      };
 
-  useEffect(() => {
-    // SpeechRecognition setup...
-  }, []);
+      recognitionRef.current.onstart = () => {
+        setIsRecording(true);
+      };
 
+      recognitionRef.current.onend = () => {
+        setIsRecording(false);
+        if (input.trim()) {
+          handleSend(input); // Auto-send if there's input
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsRecording(false);
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          text: `Speech recognition error: ${event.error}. Please try again.`,
+        }]);
+      };
+    }
+  }, [input]);
+
+  // Placeholder typing effect
   useEffect(() => {
-    // Placeholder typing effect...
+    if (input || isProcessing || sessionError || isRecording) {
+      setCurrentPlaceholder('');
+      return;
+    }
+
+    const currentText = PLACEHOLDER_SUGGESTIONS[placeholderIndex];
+    const typingSpeed = 50;
+    const pauseDuration = 2000;
+
+    if (charIndex < currentText.length) {
+      const timeout = setTimeout(() => {
+        setCurrentPlaceholder(currentText.slice(0, charIndex + 1));
+        setCharIndex(charIndex + 1);
+      }, typingSpeed);
+      return () => clearTimeout(timeout);
+    } else {
+      const timeout = setTimeout(() => {
+        setCharIndex(0);
+        setPlaceholderIndex((placeholderIndex + 1) % PLACEHOLDER_SUGGESTIONS.length);
+      }, pauseDuration);
+      return () => clearTimeout(timeout);
+    }
   }, [charIndex, placeholderIndex, input, isProcessing, sessionError, isRecording]);
 
   useEffect(() => {
-   const fetchInitialState = async () => {
+    const fetchInitialState = async () => {
       try {
-        console.log('Fetching initial chat state...');
         const response = await fetch(`${API_BASE_URL}/chat/state`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           credentials: 'include',
@@ -296,20 +324,15 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           if (response.status === 401) {
             const healthy = await checkSessionHealth();
             if (healthy) {
-              console.log('Session valid, retrying initial state fetch...');
               fetchInitialState();
               return;
             }
           }
-          console.log('Failed to fetch initial state, using default messages');
-          // setMessages(getDefaultMessages());
           const defaultMessages = await getDefaultMessages();
           setMessages(defaultMessages);
           return;
         }
         const { messages: initialMessages, appointmentDetails } = await response.json();
-        console.log('Received initial state:', { initialMessages, appointmentDetails });
-
         if (initialMessages && initialMessages.length > 0) {
           const parsedMessages = initialMessages
             .filter((msg: any) => msg.role !== 'system')
@@ -321,132 +344,83 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
                       const parsed = JSON.parse(msg.content);
                       return parsed.response || msg.content;
                     } catch (e) {
-                      console.error('Error parsing message content:', e);
                       return msg.content;
                     }
                   })(),
               type: msg.role === 'user' ? 'user' : 'assistant',
             }));
-          // setMessages(parsedMessages.length > 0 ? parsedMessages : getDefaultMessages());
-          if (parsedMessages.length > 0) {
-            setMessages(parsedMessages);
-          } else {
-            const defaultMessages = await getDefaultMessages();
-            setMessages(defaultMessages);
-          }
+          setMessages(parsedMessages.length > 0 ? parsedMessages : await getDefaultMessages());
         } else {
-          console.log('No initial messages, using default messages');
-          const defaultMessages = await getDefaultMessages();
-          setMessages(defaultMessages);
+          setMessages(await getDefaultMessages());
         }
         if (appointmentDetails) {
           setAppointmentStatus({ details: appointmentDetails, missingFields: [] });
+          setSelectedReason(appointmentDetails.Reason_for_Visit__c || '');
+          setSelectedDate(appointmentDetails.Appointment_Date__c || '');
+          setSelectedTime(appointmentDetails.Appointment_Time__c || '');
+          setSelectedLocation(appointmentDetails.Location__c || '');
+          setGuidedStep(appointmentDetails.Id ? 'completed' : 'reason');
+        }
+        // Fetch initial suggestions
+        const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            chatHistory: [],
+            userQuery: '',
+            userType: userType === 'customer' ? 'Regular' : 'Guest',
+            sfData: {
+              appointments: appointmentDetails ? [appointmentDetails] : [],
+              customerInfo: {
+                Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest',
+                Contact__c: '003dM000005H5A7QAK',
+              },
+            },
+            missingFields: [],
+            guidedFlow: {
+              reason: appointmentDetails?.Reason_for_Visit__c || null,
+              date: selectedDate || null,
+              time: selectedTime || null,
+              location: selectedLocation || null,
+            },
+          }),
+        });
+        if (suggestionsResponse.ok) {
+          const { suggestions } = await suggestionsResponse.json();
+          setSuggestedReplies(suggestions || []);
         }
       } catch (error) {
         console.error('Failed to fetch initial state:', error);
-        const defaultMessages = await getDefaultMessages();
-        setMessages(defaultMessages);
+        setMessages(await getDefaultMessages());
       }
     };
     checkSessionHealth().then(async (healthy) => {
-    if (healthy) {
-      await fetchInitialState();
-    } else {
-      console.log('Session unhealthy, setting default messages');
-      setSessionError(true);
-      const defaultMessages = await getDefaultMessages();
-      setMessages(defaultMessages);
-    }
-    });
-  }, [token]);
-
-
-  // Generate personalized greeting based on customer type and chat history
-  const generatePersonalizedGreeting = async (customerType: string, chatHistory?: any[], username?: string) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/generate-greeting`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          customerType,
-          chatHistory,
-          username
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (healthy) {
+        await fetchInitialState();
+      } else {
+        setSessionError(true);
+        setMessages(await getDefaultMessages());
       }
+    });
+  }, [token, userType, userName]);
 
-      const data = await response.json();
-      return data.greeting;
-    } catch (error) {
-      console.error('Error generating personalized greeting:', error);
-      // Return fallback greeting
-      return `Welcome${username ? `, ${username}` : ''}! How can I assist you today?`;
+  useEffect(() => {
+    if (guidedStep === 'completed') {
+      fetchAppointmentStatus();
     }
-  };
-
-  // Replcae with new variant
-
-  // const getDefaultMessages = (): Message[] => {
-  //   const greeting = userType === 'customer' && userName ? 
-  //     `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
-  //     `Welcome to MyBank appointment booking! How can I help you today?`;
-      
-  //   return [
-  //     { type: 'assistant', text: greeting },
-  //     { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-  //   ];
-  // };
-  const getDefaultMessages = async (): Promise<Message[]> => {
-  try {
-    const customerType = userType === 'customer' ? 'Regular' : 'Guest';
-    const chatHistoryForGreeting = messages.map(msg => ({
-      role: msg.type === 'user' ? 'user' : 'assistant',
-      content: msg.text
-    }));
-
-    const personalizedGreeting = await generatePersonalizedGreeting(
-      customerType,
-      chatHistoryForGreeting,
-      userName
-    );
-    
-    return [
-      { type: 'assistant', text: personalizedGreeting },
-      { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-    ];
-  } catch (error) {
-    console.error('Error generating personalized greeting, using fallback:', error);
-    
-    // Fallback to hardcoded greeting
-    const greeting = userType === 'customer' && userName ? 
-      `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
-      `Welcome to MyBank appointment booking! How can I help you today?`;
-      
-    return [
-      { type: 'assistant', text: greeting },
-      { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-    ];
-  }
-};
+  }, [guidedStep]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Unguided free-form send
-  const handleSend = async (text: string = input) => {
+  const handleSend = debounce(async (text: string = input) => {
     if (!text.trim() || isProcessing) return;
-    
+
     setIsProcessing(true);
     setMessages(prev => [...prev, { type: 'user', text }]);
     setInput('');
-    setMessages(prev => [...prev, { type: 'assistant', text: 'Working...', isLoading: true }]);
 
     try {
       if (sessionError) {
@@ -454,140 +428,75 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         if (!isHealthy) throw new Error('Session is not available');
         setSessionError(false);
       }
-      const { response, appointmentDetails, missingFields } = await chatWithAssistant(text);
-      setMessages(prev => prev.filter(msg => !msg.isLoading));
+
+      let nextStep = guidedStep;
+      let suggestionTypeUpdate = suggestionType;
+
+      if (guidedStep === 'reason' && text.match(/Book for\s+(.+)/i)) {
+        const reason = text.match(/Book for\s+(.+)/i)?.[1] || text;
+        setSelectedReason(reason);
+        onReasonChange(reason);
+        nextStep = 'time';
+        suggestionTypeUpdate = 'time';
+      } else if (guidedStep === 'time' && text.match(/\b(tomorrow|next|this)\b/i)) {
+        const timeMatch = text.match(/at\s+(\d{1,2}:\d{2}\s*(AM|PM))/i);
+        const dateMatch = text.match(/\b(tomorrow|next\s+\w+|this\s+\w+)\b/i);
+        if (dateMatch) setSelectedDate(dateMatch[0]);
+        if (timeMatch) setSelectedTime(timeMatch[0]);
+        nextStep = 'location';
+        suggestionTypeUpdate = 'location';
+      } else if (guidedStep === 'location' && text.match(/\b(Brooklyn|Manhattan|New York)\b/i)) {
+        const location = text.match(/\b(Brooklyn|Manhattan|New York)\b/i)?.[0] || text;
+        setSelectedLocation(location);
+        nextStep = 'confirmation';
+        suggestionTypeUpdate = 'confirmation';
+      } else if (guidedStep === 'confirmation' && text.toLowerCase().includes('confirm')) {
+        nextStep = 'completed';
+        suggestionTypeUpdate = 'reason';
+      }
+
+      const { response, appointmentDetails, missingFields, suggestions } = await chatWithAssistant(text, nextStep);
       setMessages(prev => [...prev, { type: 'assistant', text: response }]);
       setAppointmentStatus({ details: appointmentDetails, missingFields });
+      setSuggestedReplies(suggestions || []);
+      setSuggestionType(suggestionTypeUpdate);
+
+      if (nextStep === 'completed') {
+        setSelectedReason('');
+        setSelectedDate('');
+        setSelectedTime('');
+        setSelectedLocation('');
+      }
+      setGuidedStep(nextStep);
+
       await fetchAppointmentStatus();
     } catch (error) {
       console.error('Error in chat:', error);
-      setMessages(prev => prev.filter(msg => !msg.isLoading));
+      setMessages(prev => [...prev, { type: 'assistant', text: 'Sorry, something went wrong. Please try again!' }]);
       if (String(error).includes('Session')) {
         setSessionError(true);
         setMessages(prev => [...prev, {
           type: 'assistant',
-          text: 'I lost our conversation history. Please try again or refresh the page.'
+          text: 'I lost our conversation history. Please try again or refresh the page.',
         }]);
-      } else {
-        setMessages(prev => [...prev, { type: 'assistant', text: 'Sorry, something went wrong. Please try again!' }]);
       }
     } finally {
       setIsProcessing(false);
     }
-  };
-
-
-  // const handleReasonSelection = async (reason: string) => {
-  //   setSelectedReason(reason);
-  //   setMessages(prev => [...prev, { type: 'user', text: reason }]);
-  //   setIsProcessing(true);
-  //   try {
-  //     const data = await callGuidedFlow(reason, 'reasonSelection');
-  //     if (data.timeSlots && Array.isArray(data.timeSlots)) {
-  //       setLLMDateSuggestions(data.timeSlots);
-  //     }
-
-  //     const updatedMessages: Message[] = [
-  //       ...messages.filter(msg => !msg.isLoading),
-  //       { type: 'user' as const, text: reason },
-  //       { type: 'assistant' as const, text: data.response || "Here are some suggested appointment slots..." }
-  //     ];
-
-  //     setMessages(updatedMessages);
-  //     setGuidedStep('date');
-
-  //     try {
-  //       const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
-  //         method: 'POST',
-  //         headers: {
-  //           'Content-Type': 'application/json',
-  //         },
-  //         credentials: 'include',
-  //         body: JSON.stringify({
-  //           chatHistory: messages,
-  //           userQuery: reason,
-  //           userType: userType === 'customer' ? 'Regular' : 'Guest',
-  //           sfData: {
-  //             appointments: appointmentStatus.details ? [appointmentStatus.details] : [],
-  //             customerInfo: {
-  //               Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest'
-  //             }
-  //           }
-  //         }),
-  //       });
-
-  //       if (suggestionsResponse.ok) {
-  //         const suggestionsData = await suggestionsResponse.json();
-  //         if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
-  //           setSuggestedReplies(suggestionsData.suggestions);
-  //         }
-  //       }
-  //     } catch (error) {
-  //       console.error('Error fetching suggested replies during reason selection:', error);
-  //       setSuggestedReplies([
-  //         "Tomorrow afternoon",
-  //         "Next Monday",
-  //         "This Friday"
-  //       ]);
-  //     }
-  //   } catch (error) {
-  //     console.error('Error in guided flow (reason):', error);
-  //     setMessages(prev => [...prev, {
-  //       type: 'assistant',
-  //       text: 'Error retrieving date suggestions. Please try again.'
-  //     }]);
-  //   } finally {
-  //     setIsProcessing(false);
-  //   }
-  // };
-
-  const handleTimeSelection = async (slot: { display: string; raw: string }) => {
-    // Implementation...
-  };
-
-  const handleLocationSelection = async (loc: string) => {
-    // Implementation...
-  };
-
-  const handleConfirmAppointment = async () =>{
-    setMessages(prev => [...prev, { type: 'user', text: 'Confirm appointment' }]);
-    setIsProcessing(true);
-    try {
-      
-      setMessages(prev => [
-        ...prev.filter(msg => !msg.isLoading),
-        { type: 'assistant', text: "Your appointment has been booked." }
-      ]);
-      
-      setGuidedStep('completed');
-      setSelectedReason('');
-      setSelectedDateTime({ display: '', raw: '' });
-      setSelectedLocation('');
-      setLLMDateSuggestions([]);
-      setLLMLocationOptions([]);
-    } catch (error) {
-      console.error('Error confirming appointment:', error);
-      setMessages(prev => [...prev, {
-        type: 'assistant',
-        text: 'Could not confirm appointment. Please try again.'
-      }]);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  }, 500);
 
   const handleMicClick = () => {
     if (!recognitionRef.current) {
       setMessages(prev => [...prev, {
         type: 'assistant',
-        text: 'Speech recognition is not supported in your browser.'
+        text: 'Speech recognition is not supported in your browser.',
       }]);
       return;
     }
     if (!navigator.onLine) {
       setMessages(prev => [...prev, {
         type: 'assistant',
-        text: 'Your device appears to be offline. Speech recognition requires an internet connection.'
+        text: 'Your device appears to be offline. Speech recognition requires an internet connection.',
       }]);
       return;
     }
@@ -607,7 +516,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         setIsRecording(false);
         setMessages(prev => [...prev, {
           type: 'assistant',
-          text: 'Could not start speech recognition. Please try again.'
+          text: 'Could not start speech recognition. Please try again.',
         }]);
       }
     }
@@ -617,7 +526,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     const { details } = appointmentStatus;
     const chatHistory = messages.map(msg => ({ type: msg.type, text: msg.text }));
     if (!details || !details.Id) return null;
-    console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
 
     const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
       method: 'POST',
@@ -632,8 +540,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     const { isConfirmed } = await response.json();
 
     if (!isConfirmed) return null;
-
-    console.log('Is confirmed', isConfirmed);
 
     return (
       <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
@@ -658,15 +564,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
         </div>
       </div>
     );
-    // Implementation...
-  };
-
-  const reloadDateSuggestions = async () => {
-    // Implementation...
-  };
-
-  const resetSession = () => {
-    // Implementation...
   };
 
   return (
@@ -698,86 +595,43 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       {appointmentStatusComponent}
 
       <div className="border-t p-4">
-        {isGuidedMode ? (
-          <>      
+        <QuickReplyButtons
+          handleSend={handleSend}
+          isProcessing={isProcessing}
+          sessionError={sessionError}
+          suggestions={suggestedReplies}
+          suggestionType={suggestionType}
+        />
 
-            <QuickReplyButtons
-              handleSend={handleSend}
-              isProcessing={isProcessing}
-              sessionError={sessionError}
-              suggestions={suggestedReplies}
-            />
-
-            <div className="flex space-x-2 mt-4">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                placeholder={currentPlaceholder || "Type your message..."}
-                disabled={isProcessing || sessionError || isRecording}
-                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#CD1309] disabled:opacity-50"
-              />
-              <button
-                onClick={handleMicClick}
-                disabled={isProcessing || sessionError}
-                className={clsx(
-                  'px-4 py-2 rounded-lg transition-colors flex items-center justify-center',
-                  isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-800 hover:bg-gray-300',
-                  'disabled:opacity-50'
-                )}
-              >
-                <Mic className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => handleSend()}
-                disabled={isProcessing || sessionError || !input.trim() || isRecording}
-                className="px-4 py-2 bg-[#CD1309] text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:bg-gray-400"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <QuickReplyButtons
-              handleSend={handleSend}
-              isProcessing={isProcessing}
-              sessionError={sessionError}
-              suggestions={suggestedReplies}
-            />
-
-            <div className="flex space-x-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                placeholder={currentPlaceholder || "Type your message..."}
-                disabled={isProcessing || sessionError || isRecording}
-                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#CD1309] disabled:opacity-50"
-              />
-              <button
-                onClick={handleMicClick}
-                disabled={isProcessing || sessionError}
-                className={clsx(
-                  'px-4 py-2 rounded-lg transition-colors flex items-center justify-center',
-                  isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-800 hover:bg-gray-300',
-                  'disabled:opacity-50'
-                )}
-              >
-                <Mic className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => handleSend()}
-                disabled={isProcessing || sessionError || !input.trim() || isRecording}
-                className="px-4 py-2 bg-[#CD1309] text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:bg-gray-400"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-          </>
-        )}
+        <div className="flex space-x-2 mt-4">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+            placeholder={currentPlaceholder || 'Type your message...'}
+            disabled={isProcessing || sessionError || isRecording}
+            className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#CD1309] disabled:opacity-50"
+          />
+          <button
+            onClick={handleMicClick}
+            disabled={isProcessing || sessionError}
+            className={clsx(
+              'px-4 py-2 rounded-lg transition-colors flex items-center justify-center',
+              isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-800 hover:bg-gray-300',
+              'disabled:opacity-50'
+            )}
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => handleSend()}
+            disabled={isProcessing || sessionError || !input.trim() || isRecording}
+            className="px-4 py-2 bg-[#CD1309] text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:bg-gray-400"
+          >
+            <Send className="w-5 h-5" />
+          </button>
+        </div>
       </div>
     </div>
   );
