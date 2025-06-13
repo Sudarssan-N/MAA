@@ -4,3 +4,4 @@ AgentAppointment/.env
 /AgentAppointment/__pycache__
 AgentAppointment/private-key.pem
 /node_modules
+node_modules

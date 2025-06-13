@@ -17,10 +17,16 @@ const QuickReplyButtons: React.FC<QuickReplyButtonsProps> = ({
   suggestionType = 'reason',
 }) => {
   // Default suggestions if none provided
+  // const defaultSuggestions = [
+  //   { text: 'Book for loan consultation', label: 'Loan Consultation' },
+  //   { text: 'Book for opening new account', label: 'Open New Account' },
+  //   { text: 'Book for credit card application', label: 'Credit Card Application' },
+  // ];
   const defaultSuggestions = [
-    { text: 'Book for loan consultation', label: 'Loan Consultation' },
-    { text: 'Book for opening new account', label: 'Open New Account' },
-    { text: 'Book for credit card application', label: 'Credit Card Application' },
+    { text: "Book an appointment for tomorrow", label: "Book for tomorrow" },
+    { text: "Show my upcoming appointments", label: "My appointments" },
+    { text: "Find nearest branch", label: "Find branch" },
+    { text: "I need help with my account", label: "Account help" }
   ];
 
   // Map suggestions to buttons
