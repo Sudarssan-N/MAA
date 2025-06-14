@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
+const branchData = require("./branchData.json");
 const app = express();
 app.use(express.json());
 
@@ -856,6 +857,14 @@ Status: ${r.Status__c || 'Not specified'}`;
 
     req.session.chatHistory.push({ role: 'user', content: query });
 
+    const formattedBranches = branchData
+      .map((b) => {
+        return `- ${b.branch_name}, ${b.city}, ${b.state} (Services: Notary=${b.notary_services}, ATM=${b.atm_available}, CDM=${b.cdm_available}, Wheelchair=${b.wheelchair_accessible})`;
+      })
+      .join("\n");
+
+    const branchServicesContext = `Available Branches and Services:\n${formattedBranches}`;    
+
     const prompt = `
 ${PromptTemplates.persona}
 ${PromptTemplates.outputFormat}
@@ -870,6 +879,7 @@ Context:
 - User Type: ${customerType}
 - Username: ${username || 'Guest'}
 - ${contextData ? `Previous Appointments:\n${contextData}` : 'No prior appointments.'}
+- ${branchServicesContext}
 
 Instructions:
 1. Identify the user's intent (e.g., book, reschedule, cancel appointment, get branch info).
@@ -902,6 +912,8 @@ Instructions:
 10. For urgent queries (e.g., "lost card"), prioritize earlier slots.
 11. For students, prefer 3:00 PM–5:00 PM.
 12. Keep response concise (1–2 sentences, 50–75 tokens), natural, and empathetic.
+13. When suggesting appointment location, consider whether the requested service is available at that branch based on context.If a user requests a service that is unavailable at their preferred branch, inform them politely and suggest a nearby or same-city branch that provides that service, using the branch data in context.
+
 
 Output Schema:
 {
