@@ -613,20 +613,20 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-  const renderAppointmentStatus = async () => {
+const renderAppointmentStatus = async () => {
     const { details } = appointmentStatus;
     const chatHistory = messages.map(msg => ({ type: msg.type, text: msg.text }));
     if (!details || !details.Id) return null;
     console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
 
     const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: 'include',
-      body: JSON.stringify({ text: input, chatHistory }),
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ text: input, chatHistory }),
     });
 
     const { isConfirmed } = await response.json();
@@ -636,30 +636,29 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     console.log('Is confirmed', isConfirmed);
 
     return (
-      <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <CheckCircle className="w-5 h-5 text-green-600" />
-          <h3 className="font-medium">Appointment Confirmation</h3>
+        <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+                <h3 className="font-medium">Appointment Confirmation</h3>
+            </div>
+            <div className="space-y-1 text-sm">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    <div className="text-gray-500">Purpose:</div>
+                    <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
+                    <div className="text-gray-500">Date & Time:</div>
+                    <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
+                    <div className="text-gray-500">Location:</div>
+                    <div>{details?.Location__c || '(Not specified)'}</div>
+                </div>
+                {details?.Id && (
+                    <p className="mt-2 text-gray-600 text-xs">
+                        Appointment ID: {details.Id}
+                    </p>
+                )}
+            </div>
         </div>
-        <div className="space-y-1 text-sm">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <div className="text-gray-500">Purpose:</div>
-            <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
-            <div className="text-gray-500">Date & Time:</div>
-            <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
-            <div className="text-gray-500">Location:</div>
-            <div>{details?.Location__c || '(Not specified)'}</div>
-          </div>
-          {details?.Id && (
-            <p className="mt-2 text-gray-600 text-xs">
-              Appointment ID: {details.Id}
-            </p>
-          )}
-        </div>
-      </div>
     );
-    // Implementation...
-  };
+};
 
   const reloadDateSuggestions = async () => {
     // Implementation...
