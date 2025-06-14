@@ -1,0 +1,61 @@
+[{
+    "bank_name": "First National Bank",
+    "branch_name": "Downtown Branch",
+    "address": "123 Main Street, City Center",
+    "city": "Metropolis",
+    "state": "New York",
+    "pincode": "10001",
+    "wheelchair_accessible": "Y",
+    "notary_services": "Y",
+    "atm_available": "Y",
+    "cdm_available": "Y"
+  },
+  {
+    "bank_name": "First National Bank",
+    "branch_name": "Eastside Branch",
+    "address": "456 Oak Avenue, East District",
+    "city": "Metropolis",
+    "state": "New York",
+    "pincode": "10002",
+    "wheelchair_accessible": "N",
+    "notary_services": "Y",
+    "atm_available": "Y",
+    "cdm_available": "N"
+  },
+{
+    "bank_name": "First National Bank",
+    "branch_name": "West End Branch",
+    "address": "789 Pine Road, West End",
+    "city": "Gotham",
+    "state": "New Jersey",
+    "pincode": "07001",
+    "wheelchair_accessible": "Y",
+    "notary_services": "N",
+    "atm_available": "Y",
+    "cdm_available": "Y"
+  },
+  {
+    "bank_name": "First National Bank",
+    "branch_name": "Riverside Branch",
+    "address": "101 River Lane, Riverside",
+    "city": "Gotham",
+    "state": "New Jersey",
+    "pincode": "07002",
+    "wheelchair_accessible": "Y",
+    "notary_services": "Y",
+    "atm_available": "N",
+    "cdm_available": "N"
+  },
+  {
+    "bank_name": "First National Bank",
+    "branch_name": "Uptown Branch",
+    "address": "202 Hill Street, Uptown",
+    "city": "Star City",
+    "state": "California",
+    "pincode": "90001",
+    "wheelchair_accessible": "N",
+    "notary_services": "N",
+    "atm_available": "Y",
+    "cdm_available": "Y" 
+}
+]
