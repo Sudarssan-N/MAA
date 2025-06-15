@@ -26,7 +26,7 @@ export interface ChatInterfaceHandle {
 }
 
 interface Message {
-  text: string;
+  text: string | JSX.Element;
   type: 'assistant' | 'user';
   isLoading?: boolean;
 }
@@ -72,21 +72,146 @@ const GUIDED_REASONS = [
 
 type GuidedStep = 'reason' | 'date' | 'location' | 'confirmation' | 'completed' | 'reasonSelection' | 'timeSelection' | 'locationSelection';
 
+function combineDateTime(date: string | null, time: string | null): string | null {
+  if (!date && !time) return null;
+
+  // If time is already in ISO format
+  if (time && time.includes('T')) {
+    return time;
+  }
+
+  // Parse time in "HH:MM AM/PM" format
+  if (date && time) {
+    try {
+      const [timePart, period] = time.split(' ');
+      let [hours, minutes] = timePart.split(':').map(Number);
+
+      // Convert to 24-hour format
+      if (period.toLowerCase() === 'pm' && hours !== 12) {
+        hours += 12;
+      } else if (period.toLowerCase() === 'am' && hours === 12) {
+        hours = 0;
+      }
+
+      // Format as ISO 8601 (e.g., "2025-06-16T12:00:00.000Z")
+      return `${date}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`;
+    } catch (error) {
+      console.error('Error combining date and time:', error);
+      return null;
+    }
+  }
+
+  // If only date is provided, assume start of day
+  if (date) {
+    return `${date}T00:00:00.000Z`;
+  }
+
+  // If only time is provided, use today's date
+  if (time) {
+    try {
+      const [timePart, period] = time.split(' ');
+      let [hours, minutes] = timePart.split(':').map(Number);
+
+      if (period.toLowerCase() === 'pm' && hours !== 12) {
+        hours += 12;
+      } else if (period.toLowerCase() === 'am' && hours === 12) {
+        hours = 0;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      return `${today}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`;
+    } catch (error) {
+      console.error('Error combining time with today\'s date:', error);
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function formatAppointmentTime(isoDateTime: string | null): string {
   if (!isoDateTime) return '(Not specified)';
-  const date = new Date(isoDateTime);
-  const options: Intl.DateTimeFormatOptions = {
-    timeZone: 'UTC',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  };
-  let formatted = date.toLocaleString('en-US', options);
-  formatted = formatted.replace(/(\d+),/, '$1th,');
-  return formatted;
+  
+  try {
+    const date = new Date(isoDateTime);
+    
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      console.error('Invalid date input:', isoDateTime);
+      return '(Invalid date)';
+    }
+    
+    const options: Intl.DateTimeFormatOptions = {
+      timeZone: 'UTC',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    };
+    
+    let formatted = date.toLocaleString('en-US', options);
+    // Add ordinal suffix (th, st, nd, rd) to day
+    formatted = formatted.replace(/(\d+),/, (match, day) => {
+      const dayNum = parseInt(day);
+      let suffix = 'th';
+      if (dayNum % 10 === 1 && dayNum !== 11) suffix = 'st';
+      else if (dayNum % 10 === 2 && dayNum !== 12) suffix = 'nd';
+      else if (dayNum % 10 === 3 && dayNum !== 13) suffix = 'rd';
+      return `${day}${suffix},`;
+    });
+    
+    return formatted;
+  } catch (error) {
+    console.error('Error formatting date:', error, 'Input:', isoDateTime);
+    return '(Error formatting date)';
+  }
+}
+
+// Updated utility function to parse and format appointment list
+function parseAppointments(text: string): JSX.Element {
+  // Split the text into lines and filter out empty or irrelevant lines
+  const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+  
+  // Initialize an array to hold appointment items
+  const appointmentItems: JSX.Element[] = [];
+  
+  // Regular expression to match numbered appointment lines
+  // Matches: "1. **General Consultation** on **June 16, 2025** at **9:00 AM** in **Brooklyn**."
+  const appointmentRegex = /^\d+\.\s*\*\*(.*?)\*\*\s*on\s*\*\*(.*?)\*\*\s*at\s*\*\*(.*?)\*\*\s*in\s*\*\*(.*?)\*\*\.$/;
+  
+  let currentNumber = 1;
+  
+  for (const line of lines) {
+    const match = line.match(appointmentRegex);
+    if (match) {
+      const [, reason, date, time, location] = match;
+      appointmentItems.push(
+        <div key={currentNumber} className="mb-1">
+          {currentNumber}. <strong>{reason}</strong> on {date} at {time} in {location}.
+        </div>
+      );
+      currentNumber++;
+    }
+  }
+  
+  // If no appointments were matched, return the original text as a fallback
+  if (appointmentItems.length === 0) {
+    return <div>{text}</div>;
+  }
+  
+  // Return the formatted list
+  return (
+    <div>
+      {appointmentItems}
+      {lines.some(line => line.includes('If you need to reschedule or cancel')) && (
+        <div className="mt-2">
+          If you need to reschedule or cancel any of these, just let me know!
+        </div>
+      )}
+    </div>
+  );
 }
 
 const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
@@ -130,13 +255,14 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   // State for dynamic quick reply suggestions
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
 
+  const [confirmationDetails, setConfirmationDetails] = useState<AppointmentDetails | null>(null);
+
   // Default prompts for unguided flow
   const prompts = userType === 'customer' ? CUSTOMER_PROMPTS : GUEST_PROMPTS;
 
   const fetchAppointmentStatus = async () => {
     const component = await renderAppointmentStatus();
     setAppointmentStatusComponent(component);
-
   };
 
   useImperativeHandle(ref, () => ({
@@ -227,6 +353,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       response: data.response,
       appointmentDetails: data.appointmentDetails || null,
       missingFields: data.missingFields || [],
+      requiresConfirmation: data.requiresConfirmation || false,
     };
   };
 
@@ -302,7 +429,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
             }
           }
           console.log('Failed to fetch initial state, using default messages');
-          // setMessages(getDefaultMessages());
           const defaultMessages = await getDefaultMessages();
           setMessages(defaultMessages);
           return;
@@ -327,7 +453,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
                   })(),
               type: msg.role === 'user' ? 'user' : 'assistant',
             }));
-          // setMessages(parsedMessages.length > 0 ? parsedMessages : getDefaultMessages());
           if (parsedMessages.length > 0) {
             setMessages(parsedMessages);
           } else {
@@ -360,7 +485,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     });
   }, [token]);
 
-
   // Generate personalized greeting based on customer type and chat history
   const generatePersonalizedGreeting = async (customerType: string, chatHistory?: any[], username?: string) => {
     try {
@@ -390,50 +514,38 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-  // Replcae with new variant
-
-  // const getDefaultMessages = (): Message[] => {
-  //   const greeting = userType === 'customer' && userName ? 
-  //     `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
-  //     `Welcome to MyBank appointment booking! How can I help you today?`;
-      
-  //   return [
-  //     { type: 'assistant', text: greeting },
-  //     { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-  //   ];
-  // };
   const getDefaultMessages = async (): Promise<Message[]> => {
-  try {
-    const customerType = userType === 'customer' ? 'Regular' : 'Guest';
-    const chatHistoryForGreeting = messages.map(msg => ({
-      role: msg.type === 'user' ? 'user' : 'assistant',
-      content: msg.text
-    }));
+    try {
+      const customerType = userType === 'customer' ? 'Regular' : 'Guest';
+      const chatHistoryForGreeting = messages.map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: typeof msg.text === 'string' ? msg.text : msg.text.toString()
+      }));
 
-    const personalizedGreeting = await generatePersonalizedGreeting(
-      customerType,
-      chatHistoryForGreeting,
-      userName
-    );
-    
-    return [
-      { type: 'assistant', text: personalizedGreeting },
-      { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-    ];
-  } catch (error) {
-    console.error('Error generating personalized greeting, using fallback:', error);
-    
-    // Fallback to hardcoded greeting
-    const greeting = userType === 'customer' && userName ? 
-      `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
-      `Welcome to MyBank appointment booking! How can I help you today?`;
+      const personalizedGreeting = await generatePersonalizedGreeting(
+        customerType,
+        chatHistoryForGreeting,
+        userName
+      );
       
-    return [
-      { type: 'assistant', text: greeting },
-      { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
-    ];
-  }
-};
+      return [
+        { type: 'assistant', text: personalizedGreeting },
+        { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
+      ];
+    } catch (error) {
+      console.error('Error generating personalized greeting, using fallback:', error);
+      
+      // Fallback to hardcoded greeting
+      const greeting = userType === 'customer' && userName ? 
+        `Welcome back, ${userName}! How can I assist you with your banking needs today?` : 
+        `Welcome to MyBank appointment booking! How can I help you today?`;
+        
+      return [
+        { type: 'assistant', text: greeting },
+        { type: 'assistant', text: "I can help you schedule an appointment, find a branch, or answer questions about our services. Just let me know what you need!" },
+      ];
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -449,16 +561,24 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     setMessages(prev => [...prev, { type: 'assistant', text: 'Working...', isLoading: true }]);
 
     try {
-      if (sessionError) {
-        const isHealthy = await checkSessionHealth();
-        if (!isHealthy) throw new Error('Session is not available');
-        setSessionError(false);
-      }
-      const { response, appointmentDetails, missingFields } = await chatWithAssistant(text);
+      const data = await chatWithAssistant(text); 
+      
       setMessages(prev => prev.filter(msg => !msg.isLoading));
-      setMessages(prev => [...prev, { type: 'assistant', text: response }]);
-      setAppointmentStatus({ details: appointmentDetails, missingFields });
-      await fetchAppointmentStatus();
+      // Check if the response is an appointment list
+      if (text.toLowerCase().includes('show all my appointments') && data.response.toLowerCase().includes('upcoming appointments')) {
+        setMessages(prev => [...prev, { type: 'assistant', text: parseAppointments(data.response) }]);
+      } else {
+        setMessages(prev => [...prev, { type: 'assistant', text: data.response }]);
+      }
+
+      // Check for the flag from the backend
+      if (data.requiresConfirmation && data.appointmentDetails) {
+        console.log("Frontend received request to show confirmation slab.", data.appointmentDetails);
+        setConfirmationDetails(data.appointmentDetails);
+        console.log("confirmationDetails set:", data.appointmentDetails);
+      } else {
+        setAppointmentStatus({ details: data.appointmentDetails, missingFields: data.missingFields });
+      }
     } catch (error) {
       console.error('Error in chat:', error);
       setMessages(prev => prev.filter(msg => !msg.isLoading));
@@ -476,71 +596,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-
-  // const handleReasonSelection = async (reason: string) => {
-  //   setSelectedReason(reason);
-  //   setMessages(prev => [...prev, { type: 'user', text: reason }]);
-  //   setIsProcessing(true);
-  //   try {
-  //     const data = await callGuidedFlow(reason, 'reasonSelection');
-  //     if (data.timeSlots && Array.isArray(data.timeSlots)) {
-  //       setLLMDateSuggestions(data.timeSlots);
-  //     }
-
-  //     const updatedMessages: Message[] = [
-  //       ...messages.filter(msg => !msg.isLoading),
-  //       { type: 'user' as const, text: reason },
-  //       { type: 'assistant' as const, text: data.response || "Here are some suggested appointment slots..." }
-  //     ];
-
-  //     setMessages(updatedMessages);
-  //     setGuidedStep('date');
-
-  //     try {
-  //       const suggestionsResponse = await fetch(`${API_BASE_URL}/suggestedReplies`, {
-  //         method: 'POST',
-  //         headers: {
-  //           'Content-Type': 'application/json',
-  //         },
-  //         credentials: 'include',
-  //         body: JSON.stringify({
-  //           chatHistory: messages,
-  //           userQuery: reason,
-  //           userType: userType === 'customer' ? 'Regular' : 'Guest',
-  //           sfData: {
-  //             appointments: appointmentStatus.details ? [appointmentStatus.details] : [],
-  //             customerInfo: {
-  //               Customer_Type__c: userType === 'customer' ? 'Regular' : 'Guest'
-  //             }
-  //           }
-  //         }),
-  //       });
-
-  //       if (suggestionsResponse.ok) {
-  //         const suggestionsData = await suggestionsResponse.json();
-  //         if (suggestionsData.suggestions && Array.isArray(suggestionsData.suggestions)) {
-  //           setSuggestedReplies(suggestionsData.suggestions);
-  //         }
-  //       }
-  //     } catch (error) {
-  //       console.error('Error fetching suggested replies during reason selection:', error);
-  //       setSuggestedReplies([
-  //         "Tomorrow afternoon",
-  //         "Next Monday",
-  //         "This Friday"
-  //       ]);
-  //     }
-  //   } catch (error) {
-  //     console.error('Error in guided flow (reason):', error);
-  //     setMessages(prev => [...prev, {
-  //       type: 'assistant',
-  //       text: 'Error retrieving date suggestions. Please try again.'
-  //     }]);
-  //   } finally {
-  //     setIsProcessing(false);
-  //   }
-  // };
-
   const handleTimeSelection = async (slot: { display: string; raw: string }) => {
     // Implementation...
   };
@@ -549,31 +604,44 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     // Implementation...
   };
 
-  const handleConfirmAppointment = async () =>{
-    setMessages(prev => [...prev, { type: 'user', text: 'Confirm appointment' }]);
-    setIsProcessing(true);
-    try {
+  // Handler for confirming appointment
+  const handleConfirmAppointment = async () => {
+      if (!confirmationDetails) return;
+
+      setIsProcessing(true);
+      // Add a user-like message to the chat for context
+      setMessages(prev => [...prev, { type: 'user', text: 'Yes, please confirm this appointment.' }]);
       
-      setMessages(prev => [
-        ...prev.filter(msg => !msg.isLoading),
-        { type: 'assistant', text: "Your appointment has been booked." }
-      ]);
-      
-      setGuidedStep('completed');
-      setSelectedReason('');
-      setSelectedDateTime({ display: '', raw: '' });
-      setSelectedLocation('');
-      setLLMDateSuggestions([]);
-      setLLMLocationOptions([]);
-    } catch (error) {
-      console.error('Error confirming appointment:', error);
-      setMessages(prev => [...prev, {
-        type: 'assistant',
-        text: 'Could not confirm appointment. Please try again.'
-      }]);
-    } finally {
-      setIsProcessing(false);
-    }
+      try {
+          const response = await fetch(`${API_BASE_URL}/confirm-appointment`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include', // Important for sending session cookies
+              body: JSON.stringify({ appointmentDetails: confirmationDetails }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+              // Add the final success message from the backend to the chat
+              setMessages(prev => [...prev, { type: 'assistant', text: result.message }]);
+              // Clear the confirmation slab
+              setConfirmationDetails(null);
+              // Optionally clear other state
+              setAppointmentStatus({ details: null, missingFields: [] });
+          } else {
+              throw new Error(result.message || 'Failed to confirm appointment.');
+          }
+
+      } catch (error) {
+          console.error('Error confirming appointment:', error);
+          setMessages(prev => [...prev, { 
+            type: 'assistant', 
+            text: `Sorry, there was an error confirming your appointment. Please try again. Error: ${error instanceof Error ? error.message : 'Unknown error'}` 
+          }]);
+      } finally {
+          setIsProcessing(false);
+      }
   };
 
   const handleMicClick = () => {
@@ -613,52 +681,55 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
-const renderAppointmentStatus = async () => {
-    const { details } = appointmentStatus;
-    const chatHistory = messages.map(msg => ({ type: msg.type, text: msg.text }));
-    if (!details || !details.Id) return null;
-    console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
+  const renderAppointmentStatus = async () => {
+      const { details } = appointmentStatus;
+      const chatHistory = messages.map(msg => ({ 
+        type: msg.type, 
+        text: typeof msg.text === 'string' ? msg.text : msg.text.toString() 
+      }));
+      if (!details || !details.Id) return null;
+      console.log('Prompt for confirmation :', JSON.stringify({ text: input, chatHistory }));
 
-    const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        credentials: 'include',
-        body: JSON.stringify({ text: input, chatHistory }),
-    });
+      const response = await fetch(`${API_BASE_URL}/verify-confirmation`, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+          body: JSON.stringify({ text: input, chatHistory }),
+      });
 
-    const { isConfirmed } = await response.json();
+      const { isConfirmed } = await response.json();
 
-    if (!isConfirmed) return null;
+      if (!isConfirmed) return null;
 
-    console.log('Is confirmed', isConfirmed);
+      console.log('Is confirmed', isConfirmed);
 
-    return (
-        <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-                <h3 className="font-medium">Appointment Confirmation</h3>
-            </div>
-            <div className="space-y-1 text-sm">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                    <div className="text-gray-500">Purpose:</div>
-                    <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
-                    <div className="text-gray-500">Date & Time:</div>
-                    <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
-                    <div className="text-gray-500">Location:</div>
-                    <div>{details?.Location__c || '(Not specified)'}</div>
-                </div>
-                {details?.Id && (
-                    <p className="mt-2 text-gray-600 text-xs">
-                        Appointment ID: {details.Id}
-                    </p>
-                )}
-            </div>
-        </div>
-    );
-};
+      return (
+          <div className="p-4 mx-4 my-2 bg-white rounded-lg border shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  <h3 className="font-medium">Appointment Confirmation</h3>
+              </div>
+              <div className="space-y-1 text-sm">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      <div className="text-gray-500">Purpose:</div>
+                      <div>{details?.Reason_for_Visit__c || '(Not specified)'}</div>
+                      <div className="text-gray-500">Date & Time:</div>
+                      <div>{formatAppointmentTime(details?.Appointment_Time__c ?? null)}</div>
+                      <div className="text-gray-500">Location:</div>
+                      <div>{details?.Location__c || '(Not specified)'}</div>
+                  </div>
+                  {details?.Id && (
+                      <p className="mt-2 text-gray-600 text-xs">
+                          Appointment ID: {details.Id}
+                      </p>
+                  )}
+              </div>
+          </div>
+      );
+  };
 
   const reloadDateSuggestions = async () => {
     // Implementation...
@@ -687,19 +758,55 @@ const renderAppointmentStatus = async () => {
                 <span>{message.text}</span>
               </div>
             ) : (
-              message.text
+              typeof message.text === 'string' ? message.text : message.text
             )}
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {appointmentStatusComponent}
+      {/* APPOINTMENT CONFIRMATION SLAB */}
+      {confirmationDetails && (
+        <div className="p-4 mx-4 my-2 bg-gray-50 rounded-lg border-2 border-[#CD1309] shadow-md animate-fade-in">
+          <div className="flex items-center gap-3 mb-3">
+            <CheckCircle className="w-6 h-6 text-[#CD1309]" />
+            <h3 className="text-lg font-semibold text-gray-800">Confirm Your Appointment</h3>
+          </div>
+          <div className="space-y-2 text-sm text-gray-700">
+            <div className="grid grid-cols-[100px,1fr] gap-x-4">
+              <strong className="text-gray-500">Reason:</strong>
+              <span>{confirmationDetails.Reason_for_Visit__c || '(Not specified)'}</span>
+              <strong className="text-gray-500">Date & Time:</strong>
+              <span>{formatAppointmentTime(combineDateTime(confirmationDetails.Appointment_Date__c, confirmationDetails.Appointment_Time__c))}</span>
+              <strong className="text-gray-500">Location:</strong>
+              <span>{confirmationDetails.Location__c || '(Not specified)'}</span>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={handleConfirmAppointment}
+              disabled={isProcessing}
+              className="flex-1 px-4 py-2 bg-[#CD1309] text-white font-bold rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:bg-gray-400"
+            >
+              {isProcessing ? 'Confirming...' : 'Confirm Appointment'}
+            </button>
+            <button
+              onClick={() => {
+                  setConfirmationDetails(null);
+                  handleSend("No, I want to make a change.");
+              }}
+              disabled={isProcessing}
+              className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 font-bold rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="border-t p-4">
         {isGuidedMode ? (
           <>      
-
             <QuickReplyButtons
               handleSend={handleSend}
               isProcessing={isProcessing}

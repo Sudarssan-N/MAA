@@ -8,6 +8,8 @@ import session from 'express-session';
 dotenv.config();
 
 const app = express();
+const contactId = '003dM000005H5A7QAK';
+import branchData from "./branchData.json" with { type: "json" };
 app.use(express.json());
 
 // Enable CORS with more permissive settings for development
@@ -319,90 +321,67 @@ You are a friendly bank appointment assistant. Generate a personalized greeting 
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  console.log('Login request received:', req.body);
   const { username, password } = req.body;
 
-  if (!username || !password) {
-    console.log('Missing username or password');
-    return res.status(400).json({ message: 'Missing username or password' });
-  }
   if (username !== STATIC_USERNAME || password !== STATIC_PASSWORD) {
-    console.log('Invalid credentials');
     return res.status(401).json({ message: 'Invalid credentials' });
   }
 
   req.session.user = { username };
-  req.session.referralState = 'in_progress';
-  req.session.sfChatId = null;
-  console.log('User logged in, session updated:', req.session.user);
+  // **Crucially, do not set sfChatId or create a session here yet.**
+  req.session.sfChatId = null; 
+  req.session.chatHistory = []; 
+  req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
 
   const contactId = '003dM000005H5A7QAK';
-  try {
-    // Load the most recent in-progress chat session
-    const conn = getSalesforceConnection();
-    const query = `SELECT Id, History__c, Appointment_Status__c FROM Chat_Session__c WHERE Contact__c = '${contactId}' AND Appointment_Status__c = 'in_progress' ORDER BY Last_Updated__c DESC LIMIT 1`;
-    const result = await conn.query(query);
-    let greeting;
-    let incompleteAppointment = null;
+  let greeting;
 
-    if (result.records.length > 0) {
-      // Reuse existing in-progress session
+  try {
+    const conn = getSalesforceConnection();
+    // Find the MOST RECENT session, regardless of status, to see if it's in_progress.
+    const query = `SELECT Id, History__c, Appointment_Status__c FROM Chat_Session__c WHERE Contact__c = '${contactId}' ORDER BY Last_Updated__c DESC LIMIT 1`;
+    const result = await conn.query(query);
+
+    // Case 1: A session record exists AND it is 'in_progress'.
+    if (result.records.length > 0 && result.records[0].Appointment_Status__c === 'in_progress') {
       const sfChat = {
         id: result.records[0].Id,
-        chatHistory: result.records[0].History__c ? JSON.parse(result.records[0].History__c) : { chatHistory: [], guidedFlow: { reason: null, date: null, time: null, location: null } },
-        referralState: result.records[0].Appointment_Status__c,
+        chatHistory: result.records[0].History__c ? JSON.parse(result.records[0].History__c) : { chatHistory: [], guidedFlow: {} },
       };
-      req.session.chatHistory = sfChat.chatHistory.chatHistory || [];
-      req.session.guidedFlow = sfChat.chatHistory.guidedFlow || { reason: null, date: null, time: null, location: null };
-      req.session.referralState = sfChat.referralState;
+      const guidedFlowDetails = sfChat.chatHistory.guidedFlow || {};
+
+      // Generate the summary greeting to ask the user to continue.
+      let summaryPrompt = `Welcome back, ${username}! It looks like you were in the middle of booking an appointment.`;
+      if (guidedFlowDetails.reason) summaryPrompt += ` The reason was for "${guidedFlowDetails.reason}".`;
+      // ... (add other details like date, time, location if you want)
+      summaryPrompt += " Would you like to continue, or start a new booking?";
+      greeting = summaryPrompt;
+
+      // Load the state into the session to continue.
+      req.session.guidedFlow = guidedFlowDetails;
       req.session.sfChatId = sfChat.id;
-      console.log('Reusing existing in-progress chat session:', sfChat.id);
-
-      // Check for incomplete appointment
-      const guided = req.session.guidedFlow;
-      if (guided && (guided.reason || guided.date || guided.time || guided.location)) {
-        incompleteAppointment = guided;
-      }
-
-      // Generate greeting with the loaded chat history
-      greeting = await generatePersonalizedGreeting(
-        'Regular',
-        { chatHistory: req.session.chatHistory, guidedFlow: req.session.guidedFlow },
-        username,
-        incompleteAppointment
-      );
+      req.session.chatHistory = [
+        { role: 'assistant', content: JSON.stringify({ response: greeting, appointmentDetails: guidedFlowDetails }) }
+      ];
+    
+    // Case 2: No sessions exist, OR the last one was 'completed'.
     } else {
-      // No in-progress session found, initialize a new one
-      req.session.chatHistory = [];
-      req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
-      req.session.referralState = 'in_progress';
-      greeting = await generatePersonalizedGreeting('Regular', null, username, null);
-
-      // Initialize chat history with the greeting
+      // Generate a standard, fresh greeting.
+      greeting = `Welcome back, ${username}! How can I assist you with your banking needs today?`;
+      // Initialize a clean session history with just the standard greeting.
+      // We will NOT create a Salesforce record here.
       req.session.chatHistory = [
         { role: 'assistant', content: JSON.stringify({ response: greeting, appointmentDetails: null }) }
       ];
-
-      // Save new chat session
-      req.session.sfChatId = await saveChatHistoryToSalesforce({
-        contactId,
-        chatHistory: {
-          guidedFlow: req.session.guidedFlow,
-          chatHistory: req.session.chatHistory
-        },
-        referralState: 'in_progress'
-      });
-      console.log('Created new chat session:', req.session.sfChatId);
     }
 
-    // Return the greeting and initial session state
     res.json({
       message: 'Login successful',
       username,
-      greeting,
       chatHistory: req.session.chatHistory,
       guidedFlow: req.session.guidedFlow
     });
+
   } catch (error) {
     console.error('Error managing chat session on login:', error);
     res.status(500).json({ message: 'Login failed', error: error.message });
@@ -442,6 +421,68 @@ app.post('/api/auth/logout', (req, res) => {
     res.clearCookie('connect.sid');
     res.json({ message: 'Logged out successfully' });
   });
+});
+
+// In server.js, add this new endpoint
+
+app.post('/api/confirm-appointment', authenticate, async (req, res) => {
+  console.log('Received request to finalize appointment:', req.body);
+  const { appointmentDetails } = req.body;
+
+  if (!appointmentDetails) {
+    return res.status(400).json({ message: 'Missing appointment details.' });
+  }
+
+  try {
+    const conn = getSalesforceConnection();
+    
+    const dateTime = combineDateTime(appointmentDetails.Appointment_Date__c, appointmentDetails.Appointment_Time__c);
+    if (!dateTime) {
+      throw new Error('Invalid date or time format.');
+    }
+
+    const appointmentData = {
+      Reason_for_Visit__c: appointmentDetails.Reason_for_Visit__c,
+      Appointment_Time__c: dateTime,
+      Location__c: appointmentDetails.Location__c,
+      Contact__c: '003dM000005H5A7QAK', // Hardcoded Contact ID
+      ...(appointmentDetails.Banker__c && { Banker__c: appointmentDetails.Banker__c }),
+    };
+
+    const result = await conn.sobject('Appointment__c').create(appointmentData);
+
+    if (result.success) {
+      console.log('Appointment created successfully with ID:', result.id);
+      
+      // Mark the chat session as completed
+      if (req.session.sfChatId) {
+        await conn.sobject('Chat_Session__c').update({
+          Id: req.session.sfChatId,
+          Appointment_Status__c: 'completed',
+        });
+        console.log('Chat session marked as completed.');
+      }
+      
+      // Clear the session
+      req.session.chatHistory = [];
+      req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
+      req.session.sfChatId = null;
+
+      res.json({ 
+        success: true, 
+        message: `Your appointment is confirmed! Your Appointment ID is ${result.id}.`,
+        appointmentId: result.id 
+      });
+
+    } else {
+      console.error('Failed to create appointment:', result.errors);
+      res.status(500).json({ success: false, message: 'Failed to create appointment in Salesforce.' });
+    }
+
+  } catch (error) {
+    console.error('Error creating final appointment:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to create appointment.', error: error.message });
+  }
 });
 
 app.get('/api/salesforce/appointments', authenticate, async (req, res) => {
@@ -505,6 +546,14 @@ app.post('/api/chat', optionalAuthenticate, async (req, res) => {
       console.log('Missing query or customerType');
       return res.status(400).json({ message: 'Missing query or customerType' });
     }
+
+    const formattedBranches = branchData
+      .map((b) => {
+        return `- ${b.branch_name}, ${b.city}, ${b.state} (Services: Notary=${b.notary_services}, ATM=${b.atm_available}, CDM=${b.cdm_available}, Wheelchair=${b.wheelchair_accessible})`;
+      })
+      .join("\n");
+
+    const branchServicesContext = `Available Branches and Services:\n${formattedBranches}`; 
 
     if (!req.session) {
       console.error('No session object found');
@@ -654,6 +703,7 @@ Current Date: ${new Date().toISOString().split('T')[0]}
 User Query: ${query}
 User Type: ${customerType}
 ${contextData ? `Context Information:\n${contextData}` : 'No prior context available.'}
+${branchServicesContext}
 
 Extract or suggest:
 - Reason_for_Visit__c (Ask customer if not mentioned, suggest from the previous bookings if available)
@@ -693,15 +743,16 @@ Instructions:
 10. For urgent queries (e.g., "lost card"), prioritize earlier slots.
 11. For students, prefer 3:00 PM–5:00 PM.
 12. Return a JSON object with:
-    - "response": A concise (1–2 sentences, 50–75 tokens), natural, and empathetic message.
+    - "response": A concise ( 50–75 tokens), natural, and empathetic message.
     - "appointmentDetails": An object with the extracted/suggested fields (Reason_for_Visit__c, Appointment_Date__c, Appointment_Time__c, Location__c, Banker__c, Status__c, appointmentId if applicable).
     - "missingFields": An array of missing required fields (if any).
     Example:
     {
-      "response": "I can help you book an appointment. What's the reason for your visit?",
+      "response": "",
       "appointmentDetails": {},
       "missingFields": ["Reason_for_Visit__c", "Appointment_Date__c", "Appointment_Time__c", "Location__c"]
     }
+13. When suggesting appointment location, consider whether the requested service is available at that branch based on context.If a user requests a service that is unavailable at their preferred branch, inform them politely and suggest a nearby or same-city branch that provides that service, using the branch data in context.
 `;
 
 const systemPrompt = { role: 'system', content: prompt };
@@ -806,68 +857,42 @@ req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
       }
     }
 
-    if (missingFields.length === 0) {
-      const isConfirmed = await verifyConfirmation(query, req.session.chatHistory);
-      if (!isConfirmed) {
-        console.log('Appointment not confirmed by user');
-        const responseData = {
-          response: response,
-          appointmentDetails,
-          missingFields,
-          previousAppointments: previousAppointments.length > 0 ? previousAppointments : undefined
-        };
-        return res.json(responseData);
-      }
-
-      const dateTime = combineDateTime(appointmentDetails.Appointment_Date__c, appointmentDetails.Appointment_Time__c);
-      if (!dateTime) {
-        console.error('Invalid dateTime format, cannot create appointment');
-        return res.status(400).json({ 
-          message: 'Unable to create appointment due to invalid date or time format',
-          error: 'INVALID_DATETIME'
-        });
-      }
+    if (missingFields.length === 0 && appointmentDetails.Reason_for_Visit__c && appointmentDetails.Appointment_Date__c && appointmentDetails.Appointment_Time__c && appointmentDetails.Location__c) {
     
-      const fullAppointmentData = {
-        Reason_for_Visit__c: appointmentDetails.Reason_for_Visit__c,
-        Appointment_Time__c: dateTime,
-        Location__c: appointmentDetails.Location__c,
-        Contact__c: '003dM000005H5A7QAK',
-        ...(appointmentDetails.Banker__c && appointmentDetails.Banker__c.match(/^005/) && { Banker__c: appointmentDetails.Banker__c }),
+      // **NEW LOGIC**
+      // Instead of verifying, we tell the frontend it's time to show the confirmation UI.
+      console.log('All details collected. Sending to frontend for confirmation.');
+      
+      // Add a flag and the final details to the response.
+      const responseData = {
+          response: response || "Great! I have all the details. Please review and confirm your appointment.",
+          appointmentDetails,
+          missingFields: [],
+          // This is the special flag for the frontend
+          requiresConfirmation: true, 
       };
+      
+      // We still save the chat history up to this point
+      req.session.chatHistory.push({ role: 'assistant', content: JSON.stringify(responseData) });
+      await saveChatHistoryToSalesforce({ contactId, // <-- FIX: Pass the contactId here
+    chatHistory: {
+      guidedFlow: req.session.guidedFlow || { reason: null, date: null, time: null, location: null },
+      chatHistory: req.session.chatHistory
+    },
+    referralState: 'in_progress'});
+      
+      return res.json(responseData);
 
-      const createResult = await conn.sobject('Appointment__c').create(fullAppointmentData);
-      if (createResult.success) {
-        appointmentId = createResult.id;
-        appointmentDetails.Id = appointmentId;
-        appointmentDetails.Appointment_Time__c = dateTime;
-
-        if (req.session.sfChatId) {
-          await conn.sobject('Chat_Session__c').update({
-            Id: req.session.sfChatId,
-            Appointment_Status__c: 'completed',
-            Last_Updated__c: new Date().toISOString()
-          });
-          console.log('Chat session marked as completed:', req.session.sfChatId);
-          req.session.referralState = 'completed';
-        }
-
-        req.session.chatHistory = [];
-        req.session.guidedFlow = { reason: null, date: null, time: null, location: null };
-        req.session.sfChatId = null;
-      } else {
-        console.error('Failed to create appointment in Salesforce:', createResult);
-        throw new Error('Failed to create appointment in Salesforce: ' + JSON.stringify(createResult.errors));
-      }
-    }
-
-    const responseData = {
-      response,
-      appointmentDetails,
-      missingFields,
-      previousAppointments: previousAppointments.length > 0 ? previousAppointments : undefined
-    };
-    res.json(responseData);
+  } else {
+      // This is the existing logic for when fields are still missing.
+      // No changes needed here.
+      const responseData = {
+        response,
+        appointmentDetails,
+        missingFields,
+      };
+      res.json(responseData);
+  }
   } catch (error) {
     console.error('Error processing chat request:', error.message);
     const isSessionError = error.message && (
@@ -1103,10 +1128,10 @@ app.post('/api/suggestedReplies', async (req, res) => {
     Based on the conversation history and user's latest query, generate 3 short, helpful suggested replies.
     
     Guidelines for suggested replies:
-    1. Keep suggestions brief and actionable (max 5-7 words).
-    2. Make them contextually relevant to the conversation and the next likely question from the LLM.
+    1. Keep suggestions as options and actionable (max 1-2 words).
+    2. Make them contextually relevant to the conversation and the next likely answer for the LLMs question.
     3. If the user has specified an appointment reason (e.g., "loan"), suggest time slots (e.g., "10:00 AM", "12:00 PM") and a location (e.g., "Brooklyn") for the next step.
-    4. If the user is asking about branches, include suggestions related to services, accessibility, or drive-thru availability.
+    4. If the user is asking about branches (Brookly, Manhattan and NewYork), include suggestions related to services, accessibility, or drive-thru availability.
     5. If no reason is specified, suggest reasons like "Loan appointment", "Account opening".
     6. Use customer data from sfData (e.g., preferred branch) to personalize suggestions when available.
     7. Return ONLY a JSON object with a "suggestions" array, no explanations.
