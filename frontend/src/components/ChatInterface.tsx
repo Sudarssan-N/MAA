@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 're
 import { Send, MessageSquare, AlertCircle, CheckCircle, Mic, Bookmark } from 'lucide-react';
 import clsx from 'clsx';
 import QuickReplyButtons from './QuickReplyButtons';
+import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
 
 // SpeechRecognition support
 declare global {
@@ -731,14 +733,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       );
   };
 
-  const reloadDateSuggestions = async () => {
-    // Implementation...
-  };
-
-  const resetSession = () => {
-    // Implementation...
-  };
-
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -746,7 +740,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           <div
             key={index}
             className={clsx(
-              'p-3 rounded-lg max-w-[85%]',
+              'p-3 rounded-lg max-w-[75%] w-fit',
               message.type === 'assistant'
                 ? 'mr-auto bg-gray-100 text-gray-800'
                 : 'ml-auto bg-[#CD1309] text-white'
@@ -755,10 +749,25 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
             {message.isLoading ? (
               <div className="flex items-center space-x-2">
                 <div className="animate-pulse">...</div>
-                <span>{message.text}</span>
+                <span>
+                  {typeof message.text === 'string' ? message.text : ''}
+                </span>
               </div>
             ) : (
-              typeof message.text === 'string' ? message.text : message.text
+              typeof message.text === 'string' ? (
+                <ReactMarkdown 
+                  rehypePlugins={[rehypeRaw]}
+                  components={{
+                    p: ({ children }) => <p className="mb-2 last:mb-0 whitespace-pre-wrap break-words">{children}</p>,
+                    strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                    em: ({ children }) => <em className="italic">{children}</em>,
+                  }}
+                >
+                  {message.text}
+                </ReactMarkdown>
+              ) : (
+                message.text // Render JSX.Element directly if not a string
+              )
             )}
           </div>
         ))}
