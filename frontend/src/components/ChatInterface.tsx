@@ -88,10 +88,13 @@ function combineDateTime(date: string | null, time: string | null): string | nul
       const [timePart, period] = time.split(' ');
       let [hours, minutes] = timePart.split(':').map(Number);
 
+      // Defensive: If period is missing, default to AM
+      const periodLower = period ? period.toLowerCase() : 'am';
+
       // Convert to 24-hour format
-      if (period.toLowerCase() === 'pm' && hours !== 12) {
+      if (periodLower === 'pm' && hours !== 12) {
         hours += 12;
-      } else if (period.toLowerCase() === 'am' && hours === 12) {
+      } else if (periodLower === 'am' && hours === 12) {
         hours = 0;
       }
 
@@ -114,9 +117,11 @@ function combineDateTime(date: string | null, time: string | null): string | nul
       const [timePart, period] = time.split(' ');
       let [hours, minutes] = timePart.split(':').map(Number);
 
-      if (period.toLowerCase() === 'pm' && hours !== 12) {
+      const periodLower = period ? period.toLowerCase() : 'am';
+
+      if (periodLower === 'pm' && hours !== 12) {
         hours += 12;
-      } else if (period.toLowerCase() === 'am' && hours === 12) {
+      } else if (periodLower === 'am' && hours === 12) {
         hours = 0;
       }
 
