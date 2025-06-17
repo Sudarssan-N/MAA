@@ -793,7 +793,12 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
               <strong className="text-gray-500">Date & Time:</strong>
               <span>{formatAppointmentTime(combineDateTime(confirmationDetails.Appointment_Date__c, confirmationDetails.Appointment_Time__c))}</span>
               <strong className="text-gray-500">Location:</strong>
-              <span>{confirmationDetails.Location__c || '(Not specified)'}</span>
+              <span>{confirmationDetails.Location__c?.split(",")[0] || '(Not specified)'}</span>
+            </div>
+            <div className="mt-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-3 text-sm rounded">
+              <strong>Reminder:</strong> Please bring a valid government-issued
+              ID, address proof, and recent financial statements to your
+              appointment.
             </div>
           </div>
           <div className="mt-4 flex gap-3">

@@ -1,6 +1,6 @@
 [{
     "bank_name": "First National Bank",
-    "branch_name": "Downtown Branch",
+    "branch_name": "Downtown",
     "address": "123 Main Street, City Center",
     "city": "Metropolis",
     "state": "New York",
@@ -12,7 +12,7 @@
   },
   {
     "bank_name": "First National Bank",
-    "branch_name": "Eastside Branch",
+    "branch_name": "Eastside",
     "address": "456 Oak Avenue, East District",
     "city": "Metropolis",
     "state": "New York",
@@ -24,7 +24,7 @@
   },
 {
     "bank_name": "First National Bank",
-    "branch_name": "West End Branch",
+    "branch_name": "West End",
     "address": "789 Pine Road, West End",
     "city": "Gotham",
     "state": "New Jersey",
@@ -36,7 +36,7 @@
   },
   {
     "bank_name": "First National Bank",
-    "branch_name": "Riverside Branch",
+    "branch_name": "Riverside",
     "address": "101 River Lane, Riverside",
     "city": "Gotham",
     "state": "New Jersey",
@@ -48,7 +48,7 @@
   },
   {
     "bank_name": "First National Bank",
-    "branch_name": "Uptown Branch",
+    "branch_name": "Uptown",
     "address": "202 Hill Street, Uptown",
     "city": "Star City",
     "state": "California",

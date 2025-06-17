@@ -429,6 +429,11 @@ app.post('/api/confirm-appointment', authenticate, async (req, res) => {
   console.log('Received request to finalize appointment:', req.body);
   const { appointmentDetails } = req.body;
 
+  if (appointmentDetails?.Location__c) {
+    appointmentDetails.Location__c =
+      appointmentDetails.Location__c.split(",")[0].trim();
+  }
+
   if (!appointmentDetails) {
     return res.status(400).json({ message: 'Missing appointment details.' });
   }
@@ -738,7 +743,7 @@ Instructions:
    - For Location__c: "Which branch would you prefer to visit?"
    - Combine prompts if multiple fields are missing.
 7. Acknowledge existing details to personalize the response.
-8. If all required fields are present and valid for rescheduling or booking, confirm with user and include a reminder to bring ID, address proof, and statements.
+8. If all required fields are present and valid for rescheduling or booking, confirm with user.
 9. For cancellation, confirm cancellation and ask how else to assist.
 10. For urgent queries (e.g., "lost card"), prioritize earlier slots.
 11. For students, prefer 3:00 PM–5:00 PM.
@@ -803,6 +808,10 @@ req.session.chatHistory.push({ role: 'assistant', content: llmOutput });
     }
 
     const { response, appointmentDetails } = parsedResponse;
+    if (appointmentDetails?.Location__c) {
+      appointmentDetails.Location__c =
+        appointmentDetails.Location__c.split(",")[0].trim();
+    }
     let appointmentId = null;
 
     const requiredFields = ['Reason_for_Visit__c', 'Appointment_Date__c', 'Appointment_Time__c', 'Location__c'];
