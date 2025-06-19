@@ -718,6 +718,7 @@ Extract or suggest:
 - Banker__c (use the Preferred Banker ID from context if available, otherwise omit it unless specified)
 
 Instructions:
+If there is an appointment existing with the same reason, date, time, and location, suggest rescheduling it.
 1. Identify the user's intent (e.g., book, reschedule, cancel appointment, get branch info).
 2. For rescheduling:
    - Identify the appointment to reschedule (use most recent non-cancelled appointment if not specified).
