@@ -55,6 +55,7 @@ const GUEST_PROMPTS = [
   "Can I schedule an appointment for tomorrow?"
 ];
 
+
 const PLACEHOLDER_SUGGESTIONS = [
   "For Example .... Book an appointment for next Monday 2pm at Manhattan for a loan consultation",
   "For Example .... Find me the nearest branch with 24hrs Check Deposit with drive-thru service",
@@ -258,6 +259,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [currentPlaceholder, setCurrentPlaceholder] = useState('');
   const [charIndex, setCharIndex] = useState(0);
+  const [isListening, setIsListening] = useState(false);
 
   // State for dynamic quick reply suggestions
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
@@ -412,6 +414,78 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
   useEffect(() => {
     // SpeechRecognition setup...
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognitionRef.current = new SpeechRecognitionAPI();
+    recognitionRef.current.continuous = false;
+    recognitionRef.current.interimResults = true;
+    recognitionRef.current.maxAlternatives = 3;
+    recognitionRef.current.lang = 'en-US';
+
+    recognitionRef.current.onresult = (event) => {
+      if (event.results[0].isFinal) {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
+        setIsRecording(false);
+        retryCount.current = 0;
+      } else {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
+      }
+    };
+
+    recognitionRef.current.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      if (event.error === 'network' || event.error === 'service-not-allowed') {
+        if (retryCount.current < MAX_RETRIES) {
+          retryCount.current += 1;
+          setMessages(prev => [...prev, {
+            type: 'assistant',
+            text: `Connection issue detected. Retrying (${retryCount.current}/${MAX_RETRIES})...`
+          }]);
+          setTimeout(() => {
+            if (recognitionRef.current) {
+              recognitionRef.current.continuous = false;
+              recognitionRef.current.interimResults = false;
+              recognitionRef.current.start();
+            }
+          }, 1000 * retryCount.current);
+        } else {
+          setIsRecording(false);
+          setMessages(prev => [...prev, {
+            type: 'assistant',
+            text: 'Speech recognition is currently unavailable. Please type your message.'
+          }]);
+          retryCount.current = 0;
+        }
+      } else if (event.error === 'no-speech') {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          text: 'I didn\'t hear anything. Please try again or type your message.'
+        }]);
+        setIsRecording(false);
+      } else if (event.error === 'aborted') {
+        setIsRecording(false);
+      } else {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          text: `Speech recognition error: ${event.error}. Please try typing instead.`
+        }]);
+        setIsRecording(false);
+      }
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current.onstart = () => {
+      console.log('Speech recognition started');
+      setIsRecording(true);
+    };
+  } else {
+    console.warn('Speech Recognition not supported in this browser.');
+  }
   }, []);
 
   useEffect(() => {
@@ -688,6 +762,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     }
   };
 
+ 
   const renderAppointmentStatus = async () => {
       const { details } = appointmentStatus;
       const chatHistory = messages.map(msg => ({ 
@@ -909,3 +984,7 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 });
 
 export default ChatInterface;
+
+// function setIsListening(arg0: boolean) {
+//   throw new Error('Function not implemented.');
+// }
