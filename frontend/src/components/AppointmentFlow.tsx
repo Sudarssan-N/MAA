@@ -25,22 +25,27 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
   onGuest,
   onReasonChange,
   showChat,
-  onToggleRecommendations, // Destructure new prop
+  onToggleRecommendations,
 }, ref) => {
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(true);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(!isLoggedIn); // Open modal if not logged in
   const [isGuidedMode, setIsGuidedMode] = useState(false);
+  const [localShowChat, setLocalShowChat] = useState(showChat);
 
   const handleLogin = async (username: string, password: string) => {
     await onLogin(username, password);
     setIsLoginModalOpen(false);
+    setLocalShowChat(true); // Show chat after login
   };
 
   const handleLogout = async () => {
     await onLogout();
+    setLocalShowChat(false); // Hide chat on logout
   };
 
   const handleGuest = () => {
     onGuest();
+    setIsLoginModalOpen(false);
+    setLocalShowChat(true); // Show chat for guest
   };
 
   return (
@@ -52,22 +57,10 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
             <h2 className="text-lg font-semibold text-gray-800">
               Schedule an Appointment
             </h2>
-            <label className="relative inline-flex items-center cursor-pointer ml-4">
-              <input
-                type="checkbox"
-                checked={isGuidedMode}
-                onChange={() => setIsGuidedMode(!isGuidedMode)}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:ring-4 peer-focus:ring-blue-300 dark:bg-gray-600 peer-checked:bg-red-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-              <span className="ml-2 text-sm font-medium text-gray-900">
-                Guided Mode
-              </span>
-            </label>
           </div>
           {isLoggedIn && (
             <div className="text-sm text-gray-600 flex space-x-2">
-              <span>Welcome, Jack</span>
+              <span>Welcome, {userName || 'Jack'}</span>
               <button
                 onClick={handleLogout}
                 className="text-red-500 hover:text-red-700 underline"
@@ -80,7 +73,7 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
 
         <div className="h-[800px] relative overflow-hidden">
           <AnimatePresence mode="wait">
-            {!showChat ? (
+            {!localShowChat ? (
               <motion.div
                 key="welcome"
                 initial={{ opacity: 0, y: 20 }}
@@ -136,10 +129,10 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
                   isLoggedIn={isLoggedIn}
                   userName={userName || 'Guest'}
                   userType={userType}
-                  token={null}
+                  token={null} // Token not used, but kept for compatibility
                   isGuidedMode={isGuidedMode}
                   onReasonChange={onReasonChange}
-                  onToggleRecommendations={onToggleRecommendations} // Pass down to ChatInterface
+                  onToggleRecommendations={onToggleRecommendations}
                 />
               </motion.div>
             )}

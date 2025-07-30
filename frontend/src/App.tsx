@@ -18,6 +18,7 @@ function App() {
     const checkSession = async () => {
       try {
         const response = await fetch('http://localhost:3000/api/auth/check-session', {
+          mode: 'cors',
           credentials: 'include',
         });
         if (response.ok) {
@@ -33,7 +34,7 @@ function App() {
           setShowChat(false);
         }
       } catch (error) {
-        console.error('Error checking session:', error);
+        console.error('Error checking session:', error instanceof Error ? error.message : 'Connection failed');
         setIsLoggedIn(false);
         setUserName(null);
         setUserType(null);
@@ -48,6 +49,7 @@ function App() {
       const response = await fetch('http://localhost:3000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
         credentials: 'include',
         body: JSON.stringify({ username, password }),
       });
@@ -61,7 +63,7 @@ function App() {
         throw new Error('Login failed');
       }
     } catch (error) {
-      console.error('Error logging in:', error);
+      console.error('Error logging in:', error instanceof Error ? error.message : 'Connection failed');
       throw error;
     }
   };
@@ -70,6 +72,7 @@ function App() {
     try {
       await fetch('http://localhost:3000/api/auth/logout', {
         method: 'POST',
+        mode: 'cors',
         credentials: 'include',
       });
       setIsLoggedIn(false);
