@@ -1,7 +1,11 @@
-const jwt = require('jsonwebtoken');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+import jwt from 'jsonwebtoken';
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Salesforce Connected App credentials
 const CLIENT_ID = '3MVG9WVXk15qiz1JB2qh2TNaYkexLOxuBu.JlZB8L9NYNJJdyZ7kUJLibukywGoaNK_qO1uc7CUxptlZfwxjD';
