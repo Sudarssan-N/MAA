@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import './i18n';
+import { useTranslation } from 'react-i18next';
 import Header from './components/Header';
 import AppointmentFlow from './components/AppointmentFlow';
 import ProductRecommendations from './components/ProductRecommendations';
@@ -13,6 +15,7 @@ function App() {
   const [showRecommendations, setShowRecommendations] = useState(false); // State to toggle recommendations
 
   const chatRef = useRef<ChatInterfaceHandle>(null);
+  const { i18n, t } = useTranslation();
 
   useEffect(() => {
     const checkSession = async () => {
@@ -108,8 +111,28 @@ function App() {
     setShowRecommendations(prev => !prev);
   };
 
+  // Add language change handler
+  const handleLanguageChange = (lng: string) => {
+    i18n.changeLanguage(lng);
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* Language Toggle Button */}
+      <div className="flex justify-end p-4">
+        <button
+          className="mr-2 px-3 py-1 bg-blue-500 text-white rounded"
+          onClick={() => handleLanguageChange('en')}
+        >
+          {t('english')}
+        </button>
+        <button
+          className="px-3 py-1 bg-green-500 text-white rounded"
+          onClick={() => handleLanguageChange('es')}
+        >
+          {t('spanish')}
+        </button>
+      </div>
       <Header />
       <main className="container mx-auto px-4 py-8 flex justify-center space-x-4">
         {/* AppointmentFlow with fixed size */}
@@ -125,6 +148,7 @@ function App() {
             onReasonChange={setCurrentReason}
             showChat={showChat}
             onToggleRecommendations={toggleRecommendations}
+            t={t} // Pass translation function
           />
         </div>
 
@@ -137,6 +161,7 @@ function App() {
               userType={userType}
               currentReason={currentReason}
               onBookAppointment={handleBookAppointment}
+              t={t} // Pass translation function
             />
           </div>
         )}

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+
 export const API_BASE_URL = 'http://localhost:3000/api';
 
 interface ProductRecommendation {
@@ -24,6 +26,7 @@ const ProductRecommendations: React.FC<ProductRecommendationsProps> = ({
   onBookAppointment,
   onSendToChat,
 }) => {
+  const { t } = useTranslation();
   const [productRecommendations, setProductRecommendations] = useState<ProductRecommendation[]>([]);
   const [recommendationReason, setRecommendationReason] = useState<string>('');
   const [bankerNotes, setBankerNotes] = useState<string[]>([]);
@@ -148,7 +151,7 @@ const ProductRecommendations: React.FC<ProductRecommendationsProps> = ({
 
   return (
     <div className="w-full max-w-md p-4 bg-white rounded-lg shadow-lg">
-      <h2 className="text-xl font-semibold mb-4 text-gray-800">Suggested Appointments</h2>
+      <h2 className="text-xl font-semibold mb-4 text-gray-800">{t('recommendations')}</h2>
       {recommendationReason && (
         <p className="text-sm text-gray-600 mb-4 italic">{recommendationReason}</p>
       )}

@@ -1,0 +1,23 @@
+{
+  "welcome": "Welcome",
+  "welcomeUser": "Welcome, {{user}}",
+  "welcomeBackUser": "Welcome back, {{user}}! How can I assist you with your banking needs today?",
+  "appointmentSchedulerDesc": "We're here to make booking an appointment with your banker quick and easy!",
+  "signOn": "Sign on",
+  "accessAccount": "Access your account",
+  "continueGuest": "Continue as guest",
+  "bookWithoutSignIn": "Book an appointment without signing in",
+  "login": "Login",
+  "logout": "Logout",
+  "guest": "Continue as Guest",
+  "bookAppointment": "Book Appointment",
+  "recommendations": "Product Recommendations",
+  "chat": "Chat",
+  "language": "Language",
+  "spanish": "Español",
+  "english": "English",
+  "quickReplyBookTomorrow": "Book for tomorrow",
+  "quickReplyMyAppointments": "My appointments",
+  "quickReplyFindBranch": "Find branch",
+  "quickReplyAccountHelp": "Account help"
+}

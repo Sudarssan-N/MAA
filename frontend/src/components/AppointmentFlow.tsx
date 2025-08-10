@@ -1,6 +1,7 @@
 import React, { useState, forwardRef, useImperativeHandle } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, Lock, UserCheck } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import ChatInterface, { ChatInterfaceHandle } from './ChatInterface';
 import LoginModal from './LoginModal';
 
@@ -27,6 +28,7 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
   showChat,
   onToggleRecommendations,
 }, ref) => {
+  const { t } = useTranslation();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(!isLoggedIn); // Open modal if not logged in
   const [isGuidedMode, setIsGuidedMode] = useState(false);
   const [localShowChat, setLocalShowChat] = useState(showChat);
@@ -55,17 +57,17 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
           <div className="flex items-center space-x-2">
             <Calendar className="w-5 h-5 text-[#CD1309]" />
             <h2 className="text-lg font-semibold text-gray-800">
-              Schedule an Appointment
+              {t('bookAppointment')}
             </h2>
           </div>
           {isLoggedIn && (
             <div className="text-sm text-gray-600 flex space-x-2">
-              <span>Welcome, {userName || 'Jack'}</span>
+              <span>{t('welcomeUser', { user: userName || 'Jack' })}</span>
               <button
                 onClick={handleLogout}
                 className="text-red-500 hover:text-red-700 underline"
               >
-                Logout
+                {t('logout')}
               </button>
             </div>
           )}
@@ -85,10 +87,11 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
                 <div className="flex-1 flex flex-col items-center justify-center space-y-8">
                   <div className="text-center space-y-2">
                     <h1 className="text-2xl font-semibold text-gray-900">
-                      Welcome to Your Appointment Scheduler
+                      {isLoggedIn ? t('welcomeBackUser', { user: userName || 'Jack' }) : t('welcome')}
                     </h1>
                     <p className="text-gray-600 max-w-md">
-                      We're here to make booking an appointment with your banker quick and easy!
+                      {/* You can add more translation keys for this paragraph if needed */}
+                      {t('appointmentSchedulerDesc', 'We\'re here to make booking an appointment with your banker quick and easy!')}
                     </p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl">
@@ -97,9 +100,9 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
                       className="flex flex-col items-center p-8 bg-white rounded-xl border-2 border-[#CD1309] hover:bg-red-50 transition-colors"
                     >
                       <Lock className="w-12 h-12 text-[#CD1309] mb-4" />
-                      <h3 className="text-xl font-semibold text-gray-900">Sign on</h3>
+                      <h3 className="text-xl font-semibold text-gray-900">{t('signOn')}</h3>
                       <p className="text-gray-600 text-center mt-2">
-                        Access your account
+                        {t('accessAccount')}
                       </p>
                     </button>
                     <button
@@ -107,9 +110,9 @@ const AppointmentFlow = forwardRef<ChatInterfaceHandle, AppointmentFlowProps>(({
                       className="flex flex-col items-center p-8 bg-gray-600 rounded-xl text-white hover:bg-gray-700 transition-colors"
                     >
                       <UserCheck className="w-12 h-12 mb-4" />
-                      <h3 className="text-xl font-semibold">Continue as guest</h3>
+                      <h3 className="text-xl font-semibold">{t('continueGuest')}</h3>
                       <p className="text-center mt-2">
-                        Book an appointment without signing in
+                        {t('bookWithoutSignIn')}
                       </p>
                     </button>
                   </div>

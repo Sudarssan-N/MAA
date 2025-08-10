@@ -1,0 +1,23 @@
+{
+  "welcome": "Bienvenido",
+  "welcomeUser": "Bienvenido, {{user}}",
+  "welcomeBackUser": "¡Bienvenido de nuevo, {{user}}! ¿Cómo puedo ayudarte con tus necesidades bancarias hoy?",
+  "appointmentSchedulerDesc": "¡Estamos aquí para que reservar una cita con tu banquero sea rápido y fácil!",
+  "signOn": "Iniciar sesión",
+  "accessAccount": "Accede a tu cuenta",
+  "continueGuest": "Continuar como invitado",
+  "bookWithoutSignIn": "Reserva una cita sin iniciar sesión",
+  "login": "Iniciar sesión",
+  "logout": "Cerrar sesión",
+  "guest": "Continuar como invitado",
+  "bookAppointment": "Reservar cita",
+  "recommendations": "Recomendaciones de productos",
+  "chat": "Chat",
+  "language": "Idioma",
+  "spanish": "Español",
+  "english": "Inglés",
+  "quickReplyBookTomorrow": "Reservar para mañana",
+  "quickReplyMyAppointments": "Mis citas",
+  "quickReplyFindBranch": "Buscar sucursal",
+  "quickReplyAccountHelp": "Ayuda de cuenta"
+}
