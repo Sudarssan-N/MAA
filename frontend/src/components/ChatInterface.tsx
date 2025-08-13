@@ -263,7 +263,16 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
 
   // State for dynamic quick reply suggestions
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
-
+  // Sentiment tracking states
+  const [sentimentHistory, setSentimentHistory] = useState<{timestamp: number, sentiment: string, score: number}[]>([]);
+  const [currentSentiment, setCurrentSentiment] = useState<string>('neutral');
+  const [interactionReport, setInteractionReport] = useState<{
+    overallSentiment: string;
+    sentimentTrend: string;
+    keyIssues: string[];
+    resolutionStatus: string;
+    timestamp: number;
+  } | null>(null);
   const [confirmationDetails, setConfirmationDetails] = useState<AppointmentDetails | null>(null);
 
   // Default prompts for unguided flow
@@ -641,7 +650,23 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
     setInput('');
     setMessages(prev => [...prev, { type: 'assistant', text: 'Working...', isLoading: true }]);
 
-    try {
+    try { 
+      console.group('Processing message and sentiment');
+      console.log('User message:', text);
+      // Analyze sentiment first
+      const sentimentResult = await analyzeSentiment(text);
+      setCurrentSentiment(sentimentResult.sentiment);
+      console.log(`Current sentiment: ${sentimentResult.sentiment} (score: ${sentimentResult.score.toFixed(2)})`);
+      
+      // Add to sentiment history
+      const newSentimentEntry = { 
+        timestamp: Date.now(),
+        sentiment: sentimentResult.sentiment,
+        score: sentimentResult.score
+      };
+      setSentimentHistory(prev => [...prev, newSentimentEntry]);
+      console.log('Updated sentiment history:', newSentimentEntry);
+
       const data = await chatWithAssistant(text); 
       
       setMessages(prev => prev.filter(msg => !msg.isLoading));
@@ -660,6 +685,13 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       } else {
         setAppointmentStatus({ details: data.appointmentDetails, missingFields: data.missingFields });
       }
+      // If the conversation has reached a significant length, generate an interaction report
+      if (messages.length >= 6 && sentimentHistory.length >= 2) {
+        console.log('Generating interaction report due to sufficient conversation history');
+        const report = await generateInteractionReport();
+        console.log('Interaction report generated:', report);
+      }
+      console.groupEnd();
     } catch (error) {
       console.error('Error in chat:', error);
       setMessages(prev => prev.filter(msg => !msg.isLoading));
@@ -674,6 +706,150 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       }
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Analyze sentiment of user message
+    // Analyze sentiment of user message
+    // Analyze sentiment of user message
+  const analyzeSentiment = async (message: string): Promise<{sentiment: string, score: number}> => {
+    try {
+      console.log('🔍 Analyzing sentiment for message:', message);
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/analyze-sentiment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({ text: message }),
+        });
+  
+          if (response.ok) {
+            const data = await response.json();
+            console.log('✅ Sentiment analysis result from API:', data);
+            return { 
+              sentiment: data.sentiment, // 'positive', 'neutral', 'negative'
+              score: data.score // Numerical score between 0-1
+            };
+          } else {
+            console.warn('❌ Sentiment API returned error:', response.status, response.statusText);
+            throw new Error(`API returned ${response.status}`);
+          }
+        } catch (apiError) {
+          // If API call fails, fall back to local analysis
+          console.warn('Falling back to local sentiment analysis:', apiError);
+          return getFallbackSentiment(message);
+        }
+      } catch (error) {
+        console.error('❌ Error in sentiment analysis:', error);
+        // Always return something to prevent app from breaking
+        return { sentiment: 'neutral', score: 0.5 };
+      }
+    };
+  
+  // Simple fallback sentiment analysis for when the API fails
+    // Simple fallback sentiment analysis for when the API fails
+  const getFallbackSentiment = (text: string): {sentiment: string, score: number} => {
+    const positiveWords = [
+      'good', 'great', 'excellent', 'happy', 'thanks', 'thank', 'appreciate', 'helpful', 
+      'perfect', 'yes', 'awesome', 'love', 'like', 'wonderful', 'fantastic', 'pleased',
+      'glad', 'excited', 'satisfied', 'enjoy', 'nice'
+    ];
+    
+    const negativeWords = [
+      'bad', 'awful', 'terrible', 'unhappy', 'frustrated', 'disappointed', 'useless', 
+      'waste', 'no', 'not', 'hate', 'dislike', 'poor', 'horrible', 'annoyed', 'annoying',
+      'worst', 'fail', 'failed', 'problem', 'issue', 'wrong'
+    ];
+    
+    const lowerText = text.toLowerCase();
+    let positiveScore = 0;
+    let negativeScore = 0;
+    
+    // Check for positive words
+    positiveWords.forEach(word => {
+      // Use word boundary to match whole words only
+      const regex = new RegExp(`\\b${word}\\b`, 'i');
+      if (regex.test(lowerText)) {
+        positiveScore++;
+        console.log(`Found positive word: "${word}"`);
+      }
+    });
+    
+    // Check for negative words
+    negativeWords.forEach(word => {
+      const regex = new RegExp(`\\b${word}\\b`, 'i');
+      if (regex.test(lowerText)) {
+        negativeScore++;
+        console.log(`Found negative word: "${word}"`);
+      }
+    });
+    
+    console.log(`Fallback sentiment analysis - Positive: ${positiveScore}, Negative: ${negativeScore}`);
+    
+    // Calculate normalized score (0 to 1)
+    let normalizedScore = 0.5; // Default neutral
+    const totalWords = positiveScore + negativeScore;
+    
+    if (totalWords > 0) {
+      normalizedScore = 0.5 + 0.5 * ((positiveScore - negativeScore) / totalWords);
+      // Clamp between 0 and 1
+      normalizedScore = Math.max(0, Math.min(1, normalizedScore));
+    }
+    
+    // Determine sentiment category
+    let sentiment = 'neutral';
+    if (normalizedScore > 0.6) sentiment = 'positive';
+    else if (normalizedScore < 0.4) sentiment = 'negative';
+    
+    console.log(`Final sentiment: ${sentiment} (score: ${normalizedScore.toFixed(2)})`);
+    
+    return { sentiment, score: normalizedScore };
+  };
+  
+  // Generate interaction report based on sentiment history
+  const generateInteractionReport = async () => {
+    try {
+      console.log('Generating interaction report based on sentiment history:', sentimentHistory);
+      const response = await fetch(`${API_BASE_URL}/generate-interaction-report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ 
+          sentimentHistory,
+          chatHistory: messages.map(msg => ({
+            role: msg.type,
+            content: typeof msg.text === 'string' ? msg.text : 'complex content'
+          }))
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const report = await response.json();
+      console.log('Interaction report generated:', report);
+      setInteractionReport(report);
+      
+      // Store the report in backend
+      await fetch(`${API_BASE_URL}/store-interaction-report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ report }),
+      });
+      
+      return report;
+    } catch (error) {
+      console.error('Error generating interaction report:', error);
+      return null;
     }
   };
 
@@ -761,6 +937,14 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
       }
     }
   };
+  // Generate final report on component unmount
+  useEffect(() => {
+    return () => {
+      if (sentimentHistory.length > 0) {
+        generateInteractionReport();
+      }
+    };
+  }, []);
 
  
   const renderAppointmentStatus = async () => {
@@ -812,9 +996,169 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(({
           </div>
       );
   };
+    // State for sentiment report modal
+  const [showSentimentReport, setShowSentimentReport] = useState(false);
+  
+  // Add keyboard shortcut for sentiment report (Ctrl+Alt+S)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        setShowSentimentReport(prev => !prev);
+        console.log('Toggled sentiment report visibility');
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+  
+  // Render sentiment report modal
+  const renderSentimentReport = () => {
+    if (!showSentimentReport) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowSentimentReport(false)}>
+        <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold">Sentiment Analysis Report</h2>
+            <button onClick={() => setShowSentimentReport(false)} className="text-gray-500 hover:text-gray-700">
+              ✕
+            </button>
+          </div>
+          
+          {sentimentHistory.length > 0 ? (
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-medium mb-2">Current Sentiment</h3>
+                <div className={`inline-block px-3 py-1 rounded-full text-white ${
+                  currentSentiment === 'positive' ? 'bg-green-500' : 
+                  currentSentiment === 'negative' ? 'bg-red-500' : 'bg-gray-400'
+                }`}>
+                  {currentSentiment}
+                </div>
+              </div>
+              
+              <div>
+                <h3 className="font-medium mb-2">Sentiment History</h3>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="p-2 text-left">Time</th>
+                        <th className="p-2 text-left">Sentiment</th>
+                        <th className="p-2 text-left">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sentimentHistory.map((item, index) => (
+                        <tr key={index} className="border-t">
+                          <td className="p-2">{new Date(item.timestamp).toLocaleTimeString()}</td>
+                          <td className="p-2">
+                            <span className={`inline-block w-2 h-2 rounded-full mr-2 ${getSentimentColor(item.sentiment)}`}></span>
+                            {item.sentiment}
+                          </td>
+                          <td className="p-2">{item.score.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              {interactionReport && (
+                <div>
+                  <h3 className="font-medium mb-2">Interaction Report</h3>
+                  <div className="bg-gray-50 p-3 rounded-lg text-sm">
+                    <p><strong>Overall Sentiment:</strong> {interactionReport.overallSentiment}</p>
+                    <p><strong>Sentiment Trend:</strong> {interactionReport.sentimentTrend}</p>
+                    <p><strong>Resolution Status:</strong> {interactionReport.resolutionStatus}</p>
+                    {interactionReport.keyIssues.length > 0 && (
+                      <div>
+                        <strong>Key Issues:</strong>
+                        <ul className="list-disc pl-5 mt-1">
+                          {interactionReport.keyIssues.map((issue, i) => (
+                            <li key={i}>{issue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-gray-500 text-center py-10">
+              No sentiment data available yet. Start a conversation to collect sentiment data.
+            </div>
+          )}
+          
+          <div className="mt-4 text-xs text-gray-500">
+            Press Ctrl+Alt+S to toggle this report at any time.
+          </div>
+        </div>
+      </div>
+    );
+  };
+    // Get color for sentiment indicator
+  const getSentimentColor = (sentiment: string) => {
+    switch(sentiment) {
+      case 'positive': return 'bg-green-500';
+      case 'negative': return 'bg-red-500';
+      case 'neutral': 
+      default: return 'bg-gray-400';
+    }
+  };
+  
+  // Render sentiment indicator (only in development)
+  const renderSentimentIndicator = () => {
+    if (process.env.NODE_ENV !== 'development') return null;
+    
+    return (
+      <div className="fixed bottom-4 right-4 bg-white p-3 rounded-lg shadow-lg border border-gray-200 z-50">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <span>Current Sentiment:</span>
+            <div className="flex items-center gap-1">
+              <div className={`w-3 h-3 rounded-full ${getSentimentColor(currentSentiment)}`}></div>
+              <span>{currentSentiment}</span>
+            </div>
+          </div>
+          
+          {sentimentHistory.length > 0 && (
+            <div className="text-xs text-gray-500">
+              <div>Sentiment samples: {sentimentHistory.length}</div>
+              <div>Latest score: {sentimentHistory[sentimentHistory.length-1]?.score.toFixed(2) || 'N/A'}</div>
+            </div>
+          )}
+          
+          {/* Mini sentiment timeline */}
+          {sentimentHistory.length > 0 && (
+            <div className="flex h-2 mt-1">
+              {sentimentHistory.slice(-8).map((item, i) => (
+                <div 
+                  key={i} 
+                  className={`flex-1 ${getSentimentColor(item.sentiment)}`}
+                  title={`${item.sentiment} (${item.score.toFixed(2)})`}
+                ></div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full">
+     {/* Debug Sentiment Indicator */}
+      {renderSentimentIndicator()}
+      
+      {/* Sentiment Report Modal */}
+      {renderSentimentReport()}
+      
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message, index) => (
           <div
