@@ -1357,61 +1357,107 @@ app.post('/api/analyze-sentiment', async (req, res) => {
       return res.status(400).json({ error: 'Text is required' });
     }
     
-    // Simple word-based sentiment analysis
-    const positiveWords = [
-      'good', 'great', 'excellent', 'happy', 'thanks', 'thank', 'appreciate', 'helpful', 
-      'perfect', 'yes', 'awesome', 'love', 'like', 'wonderful', 'fantastic'
-    ];
-    
-    const negativeWords = [
-      'bad', 'awful', 'terrible', 'unhappy', 'frustrated', 'disappointed', 'useless', 
-      'waste', 'no', 'not', 'hate', 'dislike', 'poor', 'horrible'
-    ];
-    
-    const lowerText = text.toLowerCase();
-    let positiveScore = 0;
-    let negativeScore = 0;
-    
-    // Check for positive words
-    positiveWords.forEach(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'i');
-      if (regex.test(lowerText)) {
-        positiveScore++;
-      }
+    // Use OpenAI for more contextually aware sentiment analysis
+    const prompt = `
+Analyze the sentiment of the following text in a banking customer service context. 
+Consider context, tone, nuance, and banking-specific language.
+
+Text: "${text}"
+
+Return ONLY a JSON object with the following format:
+{
+  "sentiment": "positive" | "negative" | "neutral",
+  "score": <number between 0.0 and 1.0>,
+  "reasoning": "<brief explanation of your analysis>"
+}
+
+Where:
+- sentiment is one of: "positive", "negative", or "neutral"
+- score is a number from 0.0 (very negative) through 0.5 (neutral) to 1.0 (very positive)
+- reasoning is a brief explanation of why you assigned that sentiment and score
+`;
+
+    const openaiResponse = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'system', content: prompt }],
+      max_tokens: 150,
+      temperature: 0.3,
+      response_format: { type: "json_object" }
     });
     
-    // Check for negative words
-    negativeWords.forEach(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'i');
-      if (regex.test(lowerText)) {
-        negativeScore++;
-      }
-    });
-    
-    // Calculate normalized score
-    let score = 0.5; // Default neutral
-    const totalWords = positiveScore + negativeScore;
-    
-    if (totalWords > 0) {
-      score = 0.5 + 0.5 * ((positiveScore - negativeScore) / totalWords);
-      // Clamp between 0 and 1
-      score = Math.max(0, Math.min(1, score));
-    }
-    
-    // Determine sentiment category
-    let sentiment = 'neutral';
-    if (score > 0.6) sentiment = 'positive';
-    else if (score < 0.4) sentiment = 'negative';
+    const result = JSON.parse(openaiResponse.choices[0].message.content.trim());
     
     // Log the analysis for debugging
-    console.log(`Sentiment analysis for: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-    console.log(`Positive words: ${positiveScore}, Negative words: ${negativeScore}`);
-    console.log(`Sentiment: ${sentiment}, Score: ${score.toFixed(2)}`);
+    console.log(`LLM Sentiment analysis for: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+    console.log(`Sentiment: ${result.sentiment}, Score: ${result.score.toFixed(2)}`);
+    console.log(`Reasoning: ${result.reasoning}`);
     
-    return res.json({ sentiment, score });
+    return res.json({
+      sentiment: result.sentiment,
+      score: result.score,
+      reasoning: result.reasoning
+    });
+    
   } catch (error) {
     console.error('Error analyzing sentiment:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    
+    // Fall back to simple analysis if OpenAI call fails
+    try {
+      // Simple word-based sentiment analysis as fallback
+      const positiveWords = [
+        'good', 'great', 'excellent', 'happy', 'thanks', 'thank', 'appreciate', 'helpful', 
+        'perfect', 'yes', 'awesome', 'love', 'like', 'wonderful', 'fantastic'
+      ];
+      
+      const negativeWords = [
+        'bad', 'awful', 'terrible', 'unhappy', 'frustrated', 'disappointed', 'useless', 
+        'waste', 'no', 'not', 'hate', 'dislike', 'poor', 'horrible'
+      ];
+      
+      const lowerText = text.toLowerCase();
+      let positiveScore = 0;
+      let negativeScore = 0;
+      
+      // Check for positive words
+      positiveWords.forEach(word => {
+        const regex = new RegExp(`\\b${word}\\b`, 'i');
+        if (regex.test(lowerText)) {
+          positiveScore++;
+        }
+      });
+      
+      // Check for negative words
+      negativeWords.forEach(word => {
+        const regex = new RegExp(`\\b${word}\\b`, 'i');
+        if (regex.test(lowerText)) {
+          negativeScore++;
+        }
+      });
+      
+      // Calculate normalized score
+      let score = 0.5; // Default neutral
+      const totalWords = positiveScore + negativeScore;
+      
+      if (totalWords > 0) {
+        score = 0.5 + 0.5 * ((positiveScore - negativeScore) / totalWords);
+        // Clamp between 0 and 1
+        score = Math.max(0, Math.min(1, score));
+      }
+      
+      // Determine sentiment category
+      let sentiment = 'neutral';
+      if (score > 0.6) sentiment = 'positive';
+      else if (score < 0.4) sentiment = 'negative';
+      
+      console.log(`Fallback sentiment analysis used for: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+      return res.json({ 
+        sentiment, 
+        score,
+        reasoning: "Generated using fallback keyword analysis due to LLM error" 
+      });
+    } catch (fallbackError) {
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
