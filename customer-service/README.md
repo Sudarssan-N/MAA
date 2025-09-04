@@ -1,6 +1,6 @@
 # MAA Appointment Booking Service
 
-This project implements the MAA (Multi-modal AI Assistant) for Wells Fargo Bank appointment booking, built using Google's Agent Development Kit (ADK). The agent specializes in helping bank customers schedule, reschedule, and manage appointments efficiently while providing excellent customer service.
+This project implements the MAA (Multi-modal AI Assistant) for Big Bank Bank appointment booking, built using Google's Agent Development Kit (ADK). The agent specializes in helping bank customers schedule, reschedule, and manage appointments efficiently while providing excellent customer service.
 
 ## Overview
 

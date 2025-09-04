@@ -1,7 +1,7 @@
 ## MAA Appointment Booking Service - Integration Complete! 🏦
 
 ### 🎯 Mission Accomplished
-We have successfully transformed the customer service ADK server into a **Wells Fargo MAA Appointment Booking Service** with **full Salesforce integration**!
+We have successfully transformed the customer service ADK server into a **Big Bank MAA Appointment Booking Service** with **full Salesforce integration**!
 
 ### 🔄 What Was Transformed
 
@@ -9,7 +9,7 @@ We have successfully transformed the customer service ADK server into a **Wells 
 - ❌ Garden customer service agent
 - ❌ Home improvement tools  
 - ❌ Product catalogs & purchases
-- ✅ **Wells Fargo banking agent**
+- ✅ **Big Bank banking agent**
 - ✅ **Appointment booking tools**
 - ✅ **Salesforce integration**
 
@@ -21,7 +21,7 @@ MAA Agent (Python/ADK)
     ↓ Authentication & Session Management  
 MAA Backend (Node.js/Express)
     ↓ Salesforce API Integration
-Wells Fargo Salesforce Org
+Big Bank Salesforce Org
     ↓ Contact: 003dM000005H5A7QAK (Jack Rogers)
 Real Banking Appointments
 ```
@@ -34,7 +34,7 @@ Real Banking Appointments
 5. **get_available_times** - Shows available appointment slots
 6. **get_customer_profile** - Displays customer banking profile
 7. **create_salesforce_appointment** - Direct Salesforce appointment creation
-8. **get_branch_locations** - Shows Wells Fargo branch information
+8. **get_branch_locations** - Shows Big Bank branch information
 
 ### ✅ Integration Test Results
 
@@ -97,7 +97,7 @@ Recent Appointments:
 ### 🚀 Ready for Production
 
 #### **The MAA Agent Can Now:**
-- ✅ Book real appointments in Wells Fargo Salesforce
+- ✅ Book real appointments in Big Bank Salesforce
 - ✅ Retrieve customer's existing appointments  
 - ✅ Handle authentication securely
 - ✅ Provide professional banking assistance
@@ -114,7 +114,7 @@ Recent Appointments:
 ### 🎉 Mission Status: **COMPLETE**
 
 **From:** Garden customer service mock agent  
-**To:** Wells Fargo banking appointment booking service with real Salesforce integration
+**To:** Big Bank banking appointment booking service with real Salesforce integration
 
 The transformation is complete! The MAA agent is now a fully functional banking assistant that can book real appointments in Salesforce through the MAA backend API.
 
