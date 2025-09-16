@@ -131,7 +131,7 @@ class Customer(BaseModel):
             customer_id=current_customer_id,
             customer_first_name="Jack",
             customer_last_name="Rogers",
-            email="jack.rogers@wellsfargo.com",
+            email="jack.rogers@Big Bank.com",
             phone_number="+1-555-123-4567",
             customer_start_date="2020-03-15",
             years_as_customer=5,
