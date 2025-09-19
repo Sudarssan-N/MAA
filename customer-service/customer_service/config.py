@@ -39,6 +39,7 @@ class Config(BaseSettings):
         ),
         env_prefix="GOOGLE_",
         case_sensitive=True,
+        extra="ignore",  # Allow extra fields in .env file
     )
     agent_settings: AgentModel = Field(default=AgentModel())
     app_name: str = "maa_appointment_booking_app"
