@@ -26,6 +26,7 @@ from google.adk.sessions.state import State
 from google.adk.tools.tool_context import ToolContext
 from jsonschema import ValidationError
 from customer_service.entities.customer import Customer
+from .token_tracker import TokenUsageTracker
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -37,7 +38,7 @@ RPM_QUOTA = 10
 def rate_limit_callback(
     callback_context: CallbackContext, llm_request: LlmRequest
 ) -> None:
-    """Callback function that implements a query rate limit.
+    """Callback function that implements a query rate limit and tracks token usage.
 
     Args:
       callback_context: A CallbackContext obj representing the active callback
@@ -49,12 +50,46 @@ def rate_limit_callback(
             if part.text=="":
                 part.text=" "
 
+    # Calculate input tokens (rough estimation)
+    input_text = ""
+    for content in llm_request.contents:
+        for part in content.parts:
+            if part.text:
+                input_text += part.text
     
+    # Rough token estimation: ~4 chars per token
+    estimated_input_tokens = len(input_text) // 4
     
-
+    # Initialize token tracking in state if not exists
+    if "token_stats" not in callback_context.state:
+        callback_context.state["token_stats"] = {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "session_start": time.time()
+        }
+    
+    # Update token stats
+    callback_context.state["token_stats"]["total_input_tokens"] += estimated_input_tokens
+    callback_context.state["token_stats"]["total_requests"] += 1
+    
     now = time.time()
-    if "timer_start" not in callback_context.state:
+    session_duration = now - callback_context.state["token_stats"]["session_start"]
+    
+    logger.info(
+        "📊 TOKEN USAGE - Request #%d: %d input tokens | "
+        "Session total: %d input + %d output = %d tokens | "
+        "Duration: %.1f min | Avg tokens/request: %.1f",
+        callback_context.state["token_stats"]["total_requests"],
+        estimated_input_tokens,
+        callback_context.state["token_stats"]["total_input_tokens"],
+        callback_context.state["token_stats"]["total_output_tokens"],
+        callback_context.state["token_stats"]["total_input_tokens"] + callback_context.state["token_stats"]["total_output_tokens"],
+        session_duration / 60,
+        (callback_context.state["token_stats"]["total_input_tokens"] + callback_context.state["token_stats"]["total_output_tokens"]) / max(1, callback_context.state["token_stats"]["total_requests"])
+    )
 
+    if "timer_start" not in callback_context.state:
         callback_context.state["timer_start"] = now
         callback_context.state["request_count"] = 1
         logger.debug(
@@ -189,3 +224,39 @@ def before_agent(callback_context: InvocationContext):
         ).to_json()
 
     # logger.info(callback_context.state["customer_profile"])
+
+def after_agent(callback_context: InvocationContext, response: Any):
+    """Callback to track output tokens after agent response."""
+    
+    if "token_stats" not in callback_context.state:
+        return
+    
+    # Estimate output tokens from response
+    response_text = ""
+    if hasattr(response, 'content'):
+        response_text = str(response.content)
+    elif hasattr(response, 'text'):
+        response_text = str(response.text)
+    else:
+        response_text = str(response)
+    
+    # Rough token estimation: ~4 chars per token
+    estimated_output_tokens = len(response_text) // 4
+    
+    # Update output token stats
+    callback_context.state["token_stats"]["total_output_tokens"] += estimated_output_tokens
+    
+    # Log updated stats
+    total_tokens = (
+        callback_context.state["token_stats"]["total_input_tokens"] + 
+        callback_context.state["token_stats"]["total_output_tokens"]
+    )
+    
+    logger.info(
+        "📈 RESPONSE TOKENS - Output: %d tokens | "
+        "Session Total: %d tokens | "
+        "Input/Output Ratio: %.2f",
+        estimated_output_tokens,
+        total_tokens,
+        callback_context.state["token_stats"]["total_input_tokens"] / max(1, callback_context.state["token_stats"]["total_output_tokens"])
+    )

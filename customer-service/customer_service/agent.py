@@ -22,6 +22,7 @@ from .prompts import GLOBAL_INSTRUCTION, INSTRUCTION
 from .shared_libraries.callbacks import (
     rate_limit_callback,
     before_agent,
+    after_agent,
     before_tool,
     after_tool
 )
@@ -34,6 +35,7 @@ from .tools.tools import (
     get_branch_information,
     send_appointment_confirmation,
     create_salesforce_appointment,
+    get_token_usage_stats,
 )
 
 warnings.filterwarnings("ignore", category=UserWarning, module=".*pydantic.*")
@@ -58,10 +60,12 @@ root_agent = Agent(
         get_branch_information,
         send_appointment_confirmation,
         create_salesforce_appointment,
+        get_token_usage_stats,
     ],
     before_tool_callback=before_tool,
     after_tool_callback=after_tool,
     before_agent_callback=before_agent,
+    after_agent_callback=after_agent,
     before_model_callback=rate_limit_callback,
 )
 

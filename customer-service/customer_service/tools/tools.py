@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from google.adk.tools import ToolContext
 from ..database.repositories import customer_repository, appointment_repository, branch_repository
+from ..shared_libraries.token_tracker import TokenUsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -451,3 +452,50 @@ def create_salesforce_appointment(reason: str, date: str, time: str, location: s
     """
     logger.info("create_salesforce_appointment called - redirecting to schedule_appointment")
     return schedule_appointment(reason, date, time, location, banker_id)
+
+
+def get_token_usage_stats(tool_context: ToolContext) -> dict:
+    """
+    Get current session token usage statistics and cost estimates.
+    
+    Args:
+        tool_context: The tool context containing session state
+        
+    Returns:
+        dict: Token usage statistics and cost estimates
+        
+    Example:
+        >>> get_token_usage_stats()
+        {'status': 'success', 'total_tokens': 1250, 'estimated_cost': 0.001875}
+    """
+    try:
+        stats = TokenUsageTracker.get_session_stats(tool_context.state)
+        
+        if stats["status"] == "no_data":
+            return {
+                "status": "info", 
+                "message": "No token usage data available yet. This will be populated after the first model interaction.",
+                "total_tokens": 0,
+                "estimated_cost": 0.0
+            }
+        
+        return {
+            "status": "success",
+            "message": f"Session has used {stats['total_tokens']:,} tokens across {stats['total_requests']} requests",
+            "session_duration_minutes": stats["session_duration_minutes"],
+            "total_requests": stats["total_requests"], 
+            "input_tokens": stats["input_tokens"],
+            "output_tokens": stats["output_tokens"],
+            "total_tokens": stats["total_tokens"],
+            "average_tokens_per_request": stats["average_tokens_per_request"],
+            "tokens_per_minute": stats["tokens_per_minute"],
+            "estimated_cost_usd": stats["cost_estimation"]["total_cost_usd"],
+            "cost_per_request_usd": stats["cost_estimation"]["cost_per_request_usd"]
+        }
+        
+    except Exception as e:
+        logger.error("Error getting token usage stats: %s", str(e))
+        return {
+            "status": "error",
+            "message": f"Failed to retrieve token usage stats: {str(e)}"
+        }

@@ -1,0 +1,11 @@
+| Cost Category            | Year 0 (Setup) | Year 1   | Year 2 | Year 3  | **3-Year Total** |
+| ------------------------ | -------------- | -------- | ------ | ------- | ---------------- |
+| LLM API (Gemini Flash)   | \$0            | \$18.6k  | \$19k  | \$19.5k | \~\$57k          |
+| OCP Hosting + Networking | \$0            | \$30k    | \$31k  | \$32k   | \~\$93k          |
+| MongoDB + Storage        | \$0            | \$5k     | \$5.5k | \$6k    | \~\$16.5k        |
+| Ops & Maintenance (FTEs) | \$0            | \$170k   | \$175k | \$180k  | \~\$525k         |
+| Governance & Compliance  | \$0            | \$25k    | \$26k  | \$27k   | \~\$78k          |
+| Build & Migration        | \$200k         | \$0      | \$0    | \$0     | \$200k           |
+| **Subtotal**             | **\$200k**     | \$248.6k | \$256k | \$264k  | **\$968.6k**     |
+| **Risk Buffer (15%)**    | \$30k          | \$37k    | \$38k  | \$40k   | \~\$145k         |
+| **Total TCO (3 Years)**  |                |          |        |         | **\~\$1.1M**     |
